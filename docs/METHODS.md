@@ -1,151 +1,117 @@
 # Methods
 
-All settings live in `config/nwi_t1_final.yaml`. Steps run in order from `scripts/`
-(`run_all.sh`). Every step writes into one run directory, `<output_root>/<run_id>/`.
+All settings are in `config/nwi_t1_final.yaml`. The steps in `scripts/` run in order
+(`run_all.sh`) and write into one run directory, `<output_root>/<run_id>/`.
 
-## Population
+## Fields
 
-The population is the 2026-08-20 NWI boundary layer: 29,338 fields (24,882 NV; 2,361
-CA; 1,509 UT; 275 ID; 274 OR; 37 AZ), 1985–2025, monthly. No irrigation-activity filter
-is applied.
+- **Population.** 29,338 fields of the 2026-08-20 NWI boundary layer (24,882 NV; 2,361 CA;
+  1,509 UT; 275 ID; 274 OR; 37 AZ), monthly, 1985–2025.
+- **Hydrographic area.** Each field belongs to the HA in its boundary `Basin` attribute. HAs
+  that cross the state line include their out-of-state fields.
+- **Water-right source** (`IRR_SRC`): GW, SW or mixed from the NDWR place-of-use attribution.
+  The 4,451 fields outside Nevada have no attribution and are treated as GW
+  (`IRR_SRC_ASSUMED`).
+- **Irrigation efficiency and type** (`irr_eff`, `ITYPE`): from the OpenET field export.
+- **Basin rules.**
+  - Diamond Valley (153): mixed fields are allocated as GW.
+  - Fish Lake Valley (117): mixed fields use center 0.36, range 0.2–0.7 (Rush & Katzer).
 
-The 4,451 non-Nevada fields have no `IRR_SRC`. They are treated as groundwater and
-flagged `IRR_SRC_ASSUMED`. `irr_eff` and `ITYPE` come from the OpenET export, which is
-complete. The hydrographic area comes from the boundary `Basin` attribute.
+## 01 ET and precipitation
 
-## 01 Inputs
+**ETa** comes from the monthly OpenET ensemble export:
 
-- **ETa.** Comes from the monthly OpenET ENSEMBLE export.
-  - −999 → NaN; `ETA_MM == 0` → NaN.
-  - EToF = ETa / ETo. One-month gaps are filled by linear interpolation.
-  - Longer gaps stay missing and are flagged `unfilled_missing` (177,673 field-months).
-  - Climatology fill (`etof.climatology_fill`, on in the final run; the bridge variants
-    up to `v4a_gw_subsidy_no_climatology` turn it off). `01b_etof_climatology.py` builds, from the base table,
-    each field's mean observed EToF (clipped to 0–1.5) per calendar month within each
-    window (1985–91, 1992–97, 1998–2003, 2004–09, 2010–15, 2016–21, 2022–25). Step 05
-    fills every `unfilled_missing` month from its window and flags it `climatology`.
-    OTTER (step 02) uses the same climatology-filled EToF, so ETa and Peff see the same ET.
-    1,194 field-months stay missing (no observed EToF for that field, month and window).
-  - ETa volume = EToF_interpolated × ETO_MM × acres.
-- **PRISM precipitation.** Daily PRISM 800 m precipitation at each field centroid is summed
-  to field-months. It was extracted on Earth Engine project `nasa-water` (config
-  `ee_extract_nv_20260820.toml`). The same files carry OpenET gridMET daily ETo, which
-  matches the export's monthly ETo (r = 0.99995).
+- −999 → missing; `ETA_MM == 0` → missing.
+- EToF = ETa / ETo.
+- One-month gaps are filled by linear interpolation.
+- Longer gaps are filled from the field's EToF climatology for that calendar month. There
+  are seven climatology windows covering 1985–2025: 1985–91, 1992–97, 1998–2003, 2004–09,
+  2010–15, 2016–21 and 2022–25. Each climatology is the field's mean observed EToF, clipped
+  to 0–1.5 (`01b_etof_climatology.py`).
+- 1,194 field-months have no observed EToF in their window and stay missing.
+- ETa volume = EToF × ETo × acres.
 
-## 02 OTTER effective precipitation
+**Precipitation** is PRISM 800 m daily precipitation at each field centroid, summed by
+month. It was extracted on Earth Engine project `nasa-water`. The same extraction holds
+OpenET gridMET daily ETo.
 
-OTTER runs as a continuous daily root-zone water balance per field from 1985-01-01, with
-settings NM05: `init_dru_frac = init_drl_frac = mad_frac = 0.5`.
+## 02 Effective precipitation (OTTER)
 
+OTTER runs a continuous daily root-zone water balance for each field from 1985-01-01.
+
+- **Parameters (NM05).** `init_dru_frac = init_drl_frac = mad_frac = 0.5`.
 - **Inputs:**
-  - daily PRISM precipitation;
-  - daily ETo;
-  - daily ET = ETo × monthly EToF, where EToF is the step-01 gap-filled value forward-filled
-    over the full history;
-  - static soils per field-year (`aws_u`, `aws_max`, curve number).
-- **Peff** on a day = precipitation − runoff − deep percolation. It is summed to months.
-- **Fallback.** 242 fields have missing or invalid static soils. They use 0.85 × PRISM
-  precipitation and are flagged `peff_method = ppt_085_fallback`.
+  - daily PRISM precipitation and daily ETo;
+  - daily ET = ETo × the field's monthly gap-filled EToF (the same EToF as ETa);
+  - static soils per field-year: `aws_u`, `aws_max`, curve number.
+- **Output.** Effective precipitation on a day = precipitation − runoff − deep percolation,
+  summed by month.
+- **Fallback.** 242 fields have no valid static soils. They use 0.85 × PRISM precipitation
+  (`peff_method = ppt_085_fallback`).
 
 ## 03 SPI
 
-- **Method.** `climate_indices` SPI, gamma distribution, monthly. One calibration window,
-  1981–2024, applies to every year and every series.
-- **Inputs.** PRISM monthly precipitation over each HA and over each HA's surface-water
-  contributing area, 1981–2025.
-- **Source per basin (decision D24/D29).** Use the contributing-area series where one is
-  defined, otherwise the HA-wide series.
-- **Allocation input.** Sept SPI-12 of year Y sets the share for calendar year Y.
-- **Check.** The table equals the mixed-field review's PRISM SPI exactly.
-- **Effect.** SPI now covers 2024–2025, so the 0.5 fallback used for 2025 in the delivered
-  package is no longer needed.
+- **Index.** `climate_indices` SPI, gamma distribution, monthly. One calibration window,
+  1981–2024, for every series and every year.
+- **Precipitation series.** PRISM monthly precipitation over each HA's surface-water
+  contributing area where one is defined, otherwise over the HA.
+- **Use.** The September SPI-12 of year Y sets the mixed-field split for calendar year Y.
 
-## 04 Groundwater-ET subsidy
+## 04 Groundwater-ET fraction
 
-- **Groundwater fraction f.** f(d) = Tan et al. (2025) groundwater-ET fraction, using:
-  - depth to water d from `nv_dtw_parity_statewide_100m` (EPSG:5070, 100 m);
-  - POLARIS 0–100 cm texture, sampled fresh for the 2026-08-20 fields;
-  - rooting depth from `CROP_major` (200 cm for alfalfa and phreatophytes, else 100 cm);
-  - the field's April–October mean ETo.
-- **Per-pixel averaging.** f is averaged over the field's DTW pixels, weighted by
-  coverage, so a steep f is not biased by averaging depths first.
-- **Eligibility.** Per field, from its water right: every GW, SW or mixed field is eligible.
-  Non-NV fields have no source attribute and are assumed GW. The `nwi-gw-subsidy` basin test
-  (f = 0 for pure-GW fields in basins with < 10% SW/mixed acreage) is available as
-  `gw_subsidy.sw_filter` and is off.
-
-## 05 Water balance, carry-forward, allocation
-
-Per field-month, on the whole field:
+f is the share of ETa supplied by groundwater, from Tan et al. (2025):
 
 ```
-NetET_pre_subsidy = ETa − Peff_OTTER
-GW_subsidy        = min(f × ETa, max(NetET_pre_subsidy, 0))
+f(d) = 1                                   d ≤ d_dec
+     = ((d_ext − d) / (d_ext − d_dec))^p   d_dec < d < d_ext
+     = 0                                   d ≥ d_ext
+```
+
+- **d (depth to water).** From `nv_dtw_parity_statewide_100m` (EPSG:5070, 100 m), which
+  covers every field.
+- **d_dec, d_ext, p.** From the field's:
+  - POLARIS 0–100 cm texture class;
+  - rooting depth: 200 cm for alfalfa and phreatophytes (`CROP_major`), otherwise 100 cm;
+  - April–October mean ETo.
+- **Per-pixel average.** f is averaged over the field's DTW pixels, weighted by coverage.
+- **Eligibility.** Every field is eligible through its water right.
+
+## 05 Field water balance
+
+For each field-month:
+
+```
+NetET_pre_subsidy  = ETa − Peff
+GW_subsidy         = min(f × ETa, max(NetET_pre_subsidy, 0))
 NetET_intermediate = NetET_pre_subsidy − GW_subsidy
 ```
 
-Like Peff, the subsidy is subtracted in every field-month; the field files apply no
-irrigation filter. It only offsets a positive requirement, so groundwater is never stored
-as soil water.
+Like Peff, the GW subsidy is subtracted in every field-month. It only offsets a positive
+requirement, so groundwater never enters soil storage.
 
-**Winter carry-forward** follows the delivered algorithm:
+**Winter carry-forward.**
 
-- A negative NetET_intermediate is stored as soil water.
-- Storage is capped at AWC × 1.5 m × acres; the excess is reported as overflow.
-- Storage is drawn down by later positive months.
-- The chain resets every January and breaks at a missing month.
+- A negative `NetET_intermediate` is stored as soil water. Storage is capped at
+  AWC × 1.5 m × acres, and anything above the cap is overflow.
+- Later positive months draw the storage down.
+- Storage resets every January and at a missing month.
 
-Then:
+```
+NetET_final = max(NetET_intermediate − storage used, 0)
+AR_final    = NetET_final / irr_eff
+```
 
-- NetET_final ≥ 0.
-- AR_final = NetET_final / irr_eff.
+**SW/GW allocation (dynamic SPI 50/50).**
 
-**Allocation** (Dynamic SPI 50/50):
+- A mixed field's SW share in year Y = clip(0.5 + 0.15 × Sept SPI-12, 0.2, 0.8). Its GW
+  share is 1 minus that.
+- Pure GW fields are 100% GW, and pure SW fields are 100% SW.
+- The GW and SW files scale every volume and the acreage by the share. GW + SW = ALL is
+  checked on every run.
 
-- A mixed field's SW share = 0.5 + 0.15 × Sept SPI-12, clipped to [0.2, 0.8]. Equivalently,
-  GW share = clip(0.5 − 0.15 × SPI, 0.2, 0.8).
-- Basin rules:
-  - Diamond Valley (153): mixed fields are reclassified as GW.
-  - Fish Lake Valley (117): center 0.36, range 0.2–0.7.
-- Pure GW/SW fields get 0/1.
+## 06 HA and county summaries
 
-**Outputs:**
-
-- ALL is the whole field.
-- GW and SW scale every volume and the acreage by the component share, so GW + SW = ALL
-  exactly; this is checked on every run.
-
-## 06 Summaries
-
-HA and county summaries are irrigation accounting. They sum only irrigated field-years:
-IrrMapper `%_IRRIGATED` > 0.5 (`summaries.irrigated_only`). `%_IRRIGATED` is constant
-within a field-year, so a field enters a year's summaries in all twelve months or none.
-Every volume of an included field-month counts, including its GW subsidy and
-carry-forward. Columns follow `docs/COLUMN_POLICY.md`. `statewide_annual_totals.csv`
-reports both populations (`all_field_months`, `irrigated_field_months`).
-
-## 07 Reproduction gate and bridge
-
-**Reproduction gate.** Variant `v0a` reruns the delivered settings:
-
-- export precipitation;
-- 0.85 × PPT effective precipitation;
-- gridMET SPI file ending 2023;
-- no basin overrides;
-- no subsidy;
-- no climatology fill and no irrigation filter in the summaries.
-
-It reproduces every HA × year × month cell of the 2026-08-23 HA summaries (ETa, NetET, AR,
-acres) to within 1e-11 acre-ft.
-
-**Bridge.** Variants v0b → v4_final then add one change at a time:
-
-1. Diamond Valley static override (v0b).
-2. Fish Lake dynamic rule (v1).
-3. PRISM SPI (v2).
-4. PRISM precipitation + OTTER Peff (v3).
-5. GW subsidy (v4a).
-6. EToF climatology fill (v4_final).
-
-`bridge_table.csv` gives the statewide annual-mean effect of each change, for all
-field-months and for irrigated field-years.
+The summaries count irrigated field-years only: IrrMapper `%_IRRIGATED` > 0.5. Every
+volume of an included field-year counts, including its GW subsidy and carry-forward.
+County summaries cover Nevada fields. Column rules are in
+[DATA_DICTIONARY.md](DATA_DICTIONARY.md).

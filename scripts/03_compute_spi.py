@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Step 03: PRISM SPI by HA / contributing area, and the basin-year Sept SPI-12 used for allocation.
 
-Outputs (run/03_spi/): prism_spi_monthly_by_region.csv, basin_year_spi.csv (D24 rule),
-basin_year_spi_legacy.csv (delivered package source), spi_reference_check.csv
+Outputs (run/03_spi/): prism_spi_monthly_by_region.csv, basin_year_spi.csv (contributing area, else HA),
+basin_year_spi_legacy.csv (QA variants), spi_reference_check.csv
 """
 
 import numpy as np

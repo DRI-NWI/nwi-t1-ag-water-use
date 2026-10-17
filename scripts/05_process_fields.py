@@ -133,7 +133,7 @@ basin_year = basin_year[["HYD_AREA", "YEAR", "mixed_sw_ratio", "spi_sept12", "sp
 annual = []
 # Field-share percentages describe all fields in the unit, so they come from ALL.
 PCT = ["pct_fields_gw_equivalent", "pct_fields_sw_equivalent"]
-STATES = {"ACRES_FTR_GEOM", "Soil_Moisture_Cap_acre_ft", "Soil_Storage_acre_ft"}  # not additive over time
+STATES = {"ACRES_FTR_GEOM", "ACRES_IRR", "Soil_Moisture_Cap_acre_ft", "Soil_Storage_acre_ft"}  # not additive over time
 FLUX = [c for c in water_balance.VOLUME_COLUMNS if c not in STATES]
 # HA/county summaries are irrigation accounting: only irrigated field-years (IrrMapper
 # %_IRRIGATED above the threshold) are summed. Field files keep every field-month.

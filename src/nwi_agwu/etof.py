@@ -1,19 +1,17 @@
 """Monthly OpenET ENSEMBLE field records -> EToF, gap-filled EToF and ETa.
 
-Rules are those of the delivered processor (agricultural-water-forecasting
-process_field_summaries.py, see docs/VENDORED_SOURCES.md):
+Rules:
   * -999 -> NaN in the variable columns; ETA_MM == 0 -> NaN (OpenET export bug).
   * EToF = ETA_MM / ETO_MM where ETO_MM > 0.
   * One-month gaps filled by linear interpolation per field (pandas
     ``interpolate(method='linear', limit=1)``), flagged ``linear_1month``.
   * Months that remain missing are flagged ``unfilled_missing``.
 
-Optional EToF climatology fill (config ``etof.climatology_fill``, off in the final run):
-  * Climatologies follow calculate_field_climatologies.calculate_etof_climatologies:
-    observed EToF clipped to [0, 1.5], mean per field and calendar month within each
-    gap window, clipped again. Earlier climatology sets are NV-only and keyed by May-era
-    OPENET_IDs that do not match the 2026-08-20 population, so these are built from step 01's field_month_base.parquet (scripts/01b).
-  * apply_climatology_fill follows apply_climatology_gap_filling_etof: every month still
+EToF climatology fill (config ``etof.climatology_fill``):
+  * Climatologies: observed EToF clipped to [0, 1.5], mean per field and calendar month
+    within each window, clipped again; built from step 01's field_month_base.parquet
+    (scripts/01b).
+  * apply_climatology_fill: every month still
     ``unfilled_missing`` after the linear fill takes the field's climatology for that
     calendar month from the window containing its year (nearest window outside them);
     flagged ``climatology``. Months with no climatology stay ``unfilled_missing``.
@@ -82,8 +80,8 @@ def window_key(year: int, windows) -> str:
 
 
 def build_climatologies(base: pd.DataFrame, attrs: pd.DataFrame, windows=GAP_WINDOWS) -> dict[str, pd.DataFrame]:
-    """Per-window field x calendar-month mean of observed EToF (delivered file shape:
-    OPENET_ID index, HA_NAME_CODE, NWI_ID, EToF_climo_01..12)."""
+    """Per-window field x calendar-month mean of observed EToF
+    (columns: OPENET_ID, HA_NAME_CODE, NWI_ID, EToF_climo_01..12)."""
     e = base[["NWI_ID", "YEAR", "MONTH", "EToF"]].copy()
     e["EToF"] = e["EToF"].clip(*ETOF_CLIP)
     e = e[e["EToF"].notna()]

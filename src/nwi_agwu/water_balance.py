@@ -2,18 +2,18 @@
 
 Order (per field-month, whole field):
   1. ETa      = EToF_interpolated x ETO_MM x acres
-  2. Peff     = OTTER monthly effective precipitation x acres (or 0.85 x PPT, legacy)
+  2. Peff     = OTTER monthly effective precipitation x acres
   3. NetET_pre_subsidy = ETa - Peff
   4. GW subsidy potential = f x ETa (f = field groundwater-ET fraction, Tan 2025)
      applied subsidy      = min(potential, max(NetET_pre_subsidy, 0))   [positive_netet_only]
      and only in irrigated field-months when gw_subsidy.irrigated_only (0 otherwise)
   5. NetET_intermediate = NetET_pre_subsidy - applied subsidy
-  6. Winter carry-forward (apply_winter_moisture_carryforward, vendored): negative
+  6. Winter carry-forward: negative
      NetET_intermediate is stored as soil water, capped at AWC x rooting depth x acres,
      reset every January, and drawn down by later positive months.
   7. AR_final = NetET_final / irr_eff (0 when NetET_final <= 0)
 
-The carry-forward recurrence is the delivered processor's, compiled with numba.
+The carry-forward recurrence is compiled with numba.
 """
 
 from __future__ import annotations
@@ -113,7 +113,7 @@ def compute(df: pd.DataFrame, cfg: dict, peff_mm: pd.Series, gw_frac: pd.Series 
         out["Soil_Storage_acre_ft"] = 0.0
         out["Soil_Moisture_Overflow_acre_ft"] = 0.0
         out["AR_final_acre_ft"] = out["NetET_final_acre_ft"] / eff
-    # Same post-processing as the delivered processor.
+    # Final volumes are non-negative.
     out.loc[out["AR_final_acre_ft"] < 0, "AR_final_acre_ft"] = 0.0
     out.loc[out["NetET_final_acre_ft"] < 0, "NetET_final_acre_ft"] = 0.0
     out["Carryforward_Used_acre_ft"] = out["NetET_intermediate_acre_ft"].clip(lower=0) - out["NetET_final_acre_ft"]
@@ -133,9 +133,9 @@ VOLUME_COLUMNS = ["ACRES_FTR_GEOM", "ACRES_IRR", "ETa_final_acre_ft", "PPT_vol_a
 def split_components(all_df: pd.DataFrame, share: pd.DataFrame) -> dict[str, pd.DataFrame]:
     """Scale whole-field rows into GW and SW components by the field-year SW share.
 
-    Equivalent to the delivered processor's acreage split: the carry-forward chain resets
-    every January and the share is constant within a calendar year, so every volume
-    (and the storage cap) scales linearly with the component acreage.
+    The carry-forward chain resets every January and the share is constant within a
+    calendar year, so every volume (and the storage cap) scales linearly with the
+    component acreage, and GW + SW = ALL exactly.
     """
     s = all_df[["NWI_ID", "YEAR"]].merge(share, on=["NWI_ID", "YEAR"], how="left", validate="many_to_one")
     sw = s["sw_share"].to_numpy()

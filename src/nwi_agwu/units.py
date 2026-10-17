@@ -1,5 +1,4 @@
-"""Unit conversions. MM_ACRES_TO_ACFT keeps the delivered processor's constant
-(mm / 1000 x 3.281 ft/m x acres) so volumes reproduce the 2026-08-23 package."""
+"""Unit conversions: acre-ft = mm / 1000 x 3.281 ft/m x acres."""
 
 FT_PER_M = 3.281
 M2_PER_ACRE = 4046.86

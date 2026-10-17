@@ -1,11 +1,7 @@
-"""Field-level output columns and HA / county summaries (column policy in docs/COLUMN_POLICY.md).
+"""Field-level output columns and HA / county summaries (docs/DATA_DICTIONARY.md).
 
-The delivered processor summed every numeric column and took ``first()`` of every
-text column when aggregating, so HA/county rows carried sums of per-field attributes
-(irr_eff, AWC, EToF, SPI, allocation ratio, %_IRRIGATED ...) and one arbitrary field's
-IDs. Here every summary column is either an additive volume or acreage (sum), a count,
-a depth or rate recomputed from summed volumes, an acre-weighted mean, or a
-basin-year constant (HA only). Nothing else is carried.
+Every summary column is an additive volume or acreage (sum), a count, a depth or rate
+recomputed from summed volumes, an acre-weighted mean, or a basin-year constant (HA only).
 """
 
 from __future__ import annotations
