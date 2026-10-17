@@ -33,13 +33,19 @@ FIELD_COLUMNS = [
 ]
 
 WEIGHTED_MM = ["ETO_MM", "PPT_MM", "PEFF_MM"]
+# Columns split into Nevada fields and fields outside Nevada in the HA summaries.
+STATE_SPLIT = ["ACRES_FTR_GEOM", "ETa_final_acre_ft", "PPT_vol_acre_ft", "Peff_vol_acre_ft", "GW_subsidy_acre_ft",
+               "Carryforward_Used_acre_ft", "NetET_final_acre_ft", "AR_final_acre_ft", "n_fields"]
 
 
 def field_output(df: pd.DataFrame) -> pd.DataFrame:
     return df[[c for c in FIELD_COLUMNS if c in df.columns]]
 
 
-def summarize(df: pd.DataFrame, keys: list[str], basin_year: pd.DataFrame | None = None) -> pd.DataFrame:
+def summarize(df: pd.DataFrame, keys: list[str], basin_year: pd.DataFrame | None = None,
+              state_split: bool = False) -> pd.DataFrame:
+    """Sum field rows to ``keys``. With ``state_split``, STATE_SPLIT columns are also
+    reported for Nevada fields (``_NV``) and fields outside Nevada (``_outside_NV``)."""
     d = df
     w = d["ACRES_FTR_GEOM"]
     tmp = pd.DataFrame({k: d[k] for k in keys})
@@ -61,11 +67,17 @@ def summarize(df: pd.DataFrame, keys: list[str], basin_year: pd.DataFrame | None
     tmp["n_fields_peff_fallback"] = d["peff_method"].ne("otter").astype(int) if "peff_method" in d else 0
     tmp["n_fields_gw_subsidy"] = (d["gw_frac"] > 0).astype(int)
     tmp["_acres_missing_eta"] = w.where(d["ETa_final_acre_ft"].isna(), 0)
+    if state_split:
+        nv = d["STATE"].eq("NV").to_numpy()
+        for c in STATE_SPLIT:
+            v = tmp[c]
+            tmp[f"{c}_NV"] = v.where(nv, 0)
+            tmp[f"{c}_outside_NV"] = v.where(~nv, 0)
     if "sw_share" in d.columns:
         tmp["_gw_equiv"] = np.select([src == 1, src == 2], [1.0, 0.0], 1.0 - d["sw_share"])
     g = tmp.groupby(keys, as_index=False, sort=True).sum(min_count=1)
-    for c in VOLUME_COLUMNS:
-        if c in g.columns and c not in ("ACRES_FTR_GEOM", "ACRES_IRR"):
+    for c in g.columns:
+        if c.endswith(("_acre_ft", "_acre_ft_NV", "_acre_ft_outside_NV")):
             g[c] = g[c].fillna(0.0)
     a = g["ACRES_FTR_GEOM"].replace(0, np.nan)
     for c in WEIGHTED_MM:
