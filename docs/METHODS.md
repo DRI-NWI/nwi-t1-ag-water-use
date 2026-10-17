@@ -68,8 +68,10 @@ settings NM05: `init_dru_frac = init_drl_frac = mad_frac = 0.5`.
   - the field's April–October mean ETo.
 - **Per-pixel averaging.** f is averaged over the field's DTW pixels, weighted by
   coverage, so a steep f is not biased by averaging depths first.
-- **SW filter.** Pure-GW fields in basins where SW or mixed fields hold less than 10% of
-  the acreage get f = 0 (`nwi-gw-subsidy` rule).
+- **Eligibility.** Per field, from its water right: every GW, SW or mixed field is eligible.
+  Non-NV fields have no source attribute and are assumed GW. The `nwi-gw-subsidy` basin test
+  (f = 0 for pure-GW fields in basins with < 10% SW/mixed acreage) is available as
+  `gw_subsidy.sw_filter` and is off.
 
 ## 05 Water balance, carry-forward, allocation
 
@@ -77,10 +79,12 @@ Per field-month, on the whole field:
 
 ```
 NetET_pre_subsidy = ETa − Peff_OTTER
-GW_subsidy        = min(f × ETa, max(NetET_pre_subsidy, 0))
+GW_subsidy        = min(f × ETa, max(NetET_pre_subsidy, 0))   if %_IRRIGATED > 0.5, else 0
 NetET_intermediate = NetET_pre_subsidy − GW_subsidy
 ```
 
+NetET is irrigation-accounting water, so the subsidy only offsets it in irrigated
+field-months. `GW_subsidy_potential_acre_ft` (f × ETa) is still reported for every month.
 The subsidy only offsets a positive requirement, so groundwater is never stored as soil
 water.
 

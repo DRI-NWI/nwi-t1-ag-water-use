@@ -6,6 +6,7 @@ Order (per field-month, whole field):
   3. NetET_pre_subsidy = ETa - Peff
   4. GW subsidy potential = f x ETa (f = field groundwater-ET fraction, Tan 2025)
      applied subsidy      = min(potential, max(NetET_pre_subsidy, 0))   [positive_netet_only]
+     and only in irrigated field-months when gw_subsidy.irrigated_only (0 otherwise)
   5. NetET_intermediate = NetET_pre_subsidy - applied subsidy
   6. Winter carry-forward (apply_winter_moisture_carryforward, vendored): negative
      NetET_intermediate is stored as soil water, capped at AWC x rooting depth x acres,
@@ -69,10 +70,16 @@ def compute(df: pd.DataFrame, cfg: dict, peff_mm: pd.Series, gw_frac: pd.Series 
         f = gw_frac.to_numpy()
         out["gw_frac"] = f
         pot = f * out["ETa_final_acre_ft"]
+        usable = pot
+        if g.get("irrigated_only", False):
+            # NetET is irrigation-accounting water: the subsidy only offsets it in
+            # irrigated field-months. The potential is still reported for every month.
+            irrigated = out["%_IRRIGATED"] > float(g["irrigated_min_fraction"])
+            usable = pot.where(irrigated, 0.0)
         if g["offset"] == "positive_netet_only":
-            applied = np.minimum(pot, out["NetET_pre_subsidy_acre_ft"].clip(lower=0))
+            applied = np.minimum(usable, out["NetET_pre_subsidy_acre_ft"].clip(lower=0))
         elif g["offset"] == "plain":
-            applied = pot
+            applied = usable
         else:
             raise ValueError(f"unknown subsidy offset {g['offset']!r}")
         out["GW_subsidy_potential_acre_ft"] = pot
