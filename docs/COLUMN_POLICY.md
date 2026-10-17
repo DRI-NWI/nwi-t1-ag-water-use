@@ -55,7 +55,7 @@ Keys:
 | Rule | Columns |
 |---|---|
 | Sum (additive) | `ACRES_FTR_GEOM`, `ACRES_IRR`, every `*_acre_ft` volume above |
-| Count | `n_fields`, `n_gw_fields`, `n_sw_fields`, `n_mixed_fields`, `n_fields_irr_src_assumed`, `n_fields_eta_interpolated`, `n_fields_eta_missing`, `n_fields_peff_fallback`, `n_fields_gw_subsidy` |
+| Count | `n_fields`, `n_gw_fields`, `n_sw_fields`, `n_mixed_fields`, `n_fields_irr_src_assumed`, `n_fields_eta_interpolated`, `n_fields_eta_climatology`, `n_fields_eta_missing`, `n_fields_peff_fallback`, `n_fields_gw_subsidy` |
 | Recomputed from sums | `ETa_final_ft`, `NetET_final_ft`, `AR_final_ft`, `PPT_final_ft`, `GW_subsidy_ft` (volume ÷ acres); `irr_eff_effective` (NetET ÷ AR); `pct_acres_missing_eta`; `pct_fields_gw_equivalent` / `pct_fields_sw_equivalent` (share of **all** fields in the unit, mixed fields counted by their share; identical in the ALL, GW and SW files) |
 | Acre-weighted mean (mm) | `ETO_MM`, `PPT_MM`, `PEFF_MM` |
 | Basin-year constant (HA files only) | `mixed_sw_ratio`, `spi_sept12`, `spi_source`, `allocation_method` |
