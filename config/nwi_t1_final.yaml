@@ -1,7 +1,8 @@
 # NWI T1 agricultural water use: final field-processing configuration.
 #
-# One file drives every step in scripts/. Paths point at the confirmed source
-# versions listed in docs/PROVENANCE.md. Large outputs are written outside the
+# One file drives every step in scripts/. Step 01 records mtime, size and a
+# fingerprint of every input below in <run>/01_inputs/input_receipts.json; code
+# origins are in docs/VENDORED_SOURCES.md. Large outputs are written outside the
 # repository under run.output_root/run.run_id.
 
 run:
