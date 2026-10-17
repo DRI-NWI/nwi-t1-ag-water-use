@@ -113,13 +113,22 @@ code_to_ha = attrs.drop_duplicates("HA_CODE").set_index("HA_CODE")["HYD_AREA"]
 basin_year["HYD_AREA"] = basin_year["HA_CODE"].map(code_to_ha)
 basin_year = basin_year[["HYD_AREA", "YEAR", "mixed_sw_ratio", "spi_sept12", "spi_source", "allocation_method"]]
 annual = []
-for comp, d in comps.items():
-    ha = aggregate.summarize(d, aggregate.HA_KEYS, basin_year)
+# Field-share percentages describe all fields in the unit, so they come from ALL.
+PCT = ["pct_fields_gw_equivalent", "pct_fields_sw_equivalent"]
+STATES = {"ACRES_FTR_GEOM", "Soil_Moisture_Cap_acre_ft", "Soil_Storage_acre_ft"}  # not additive over time
+nv_all = comps["ALL"][comps["ALL"]["IN_NV_COUNTY"].fillna(False).astype(bool)]
+pct_ha = aggregate.summarize(comps["ALL"], aggregate.HA_KEYS)[aggregate.HA_KEYS + PCT]
+pct_cty = aggregate.summarize(nv_all, aggregate.COUNTY_KEYS)[aggregate.COUNTY_KEYS + PCT]
+for comp in ["ALL", "GW", "SW"]:
+    d = comps[comp]
+    ha = aggregate.summarize(d, aggregate.HA_KEYS, basin_year).drop(columns=PCT)
+    ha = ha.merge(pct_ha, on=aggregate.HA_KEYS, how="left")
     ha.to_csv(out_sum / f"ha_summaries_{comp}.csv", index=False)
     nv = d[d["IN_NV_COUNTY"].fillna(False).astype(bool)]
-    cty = aggregate.summarize(nv, aggregate.COUNTY_KEYS)
+    cty = aggregate.summarize(nv, aggregate.COUNTY_KEYS).drop(columns=PCT)
+    cty = cty.merge(pct_cty, on=aggregate.COUNTY_KEYS, how="left")
     cty.to_csv(out_sum / f"county_summaries_{comp}.csv", index=False)
-    yr = ha.groupby("YEAR")[[c for c in water_balance.VOLUME_COLUMNS if c in ha.columns and c != "ACRES_FTR_GEOM"]].sum()
+    yr = ha.groupby("YEAR")[[c for c in water_balance.VOLUME_COLUMNS if c in ha.columns and c not in STATES]].sum()
     yr["ACRES_FTR_GEOM_mean_month"] = ha.groupby(["YEAR", "MONTH"])["ACRES_FTR_GEOM"].sum().groupby("YEAR").mean()
     yr.insert(0, "component", comp)
     annual.append(yr.reset_index())
