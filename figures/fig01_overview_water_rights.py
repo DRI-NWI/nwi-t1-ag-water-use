@@ -45,10 +45,10 @@ for i, (code, title, sub, letter) in enumerate(insets):
     ia.set_title(title, loc="left", fontsize=10)
     ia.text(0.98, 0.97, f"{tot / 1e3:.0f} thousand acres of fields\nSW {pct['SW']:.0f}%  GW {pct['GW']:.0f}%  "
                         f"Mixed {pct['Mixed']:.0f}%", transform=ia.transAxes, ha="right", va="top", fontsize=8,
-            bbox=dict(fc="white", ec="none", alpha=0.85))
+            bbox=dict(fc="white", ec="none", alpha=0.9), zorder=12)
     ia.text(0.5, 0.03, sub, transform=ia.transAxes, ha="center", fontsize=8.5, style="italic",
-            bbox=dict(fc="white", ec="none", alpha=0.85))
-    ia.text(0.02, 0.97, letter, transform=ia.transAxes, fontsize=14, fontweight="bold", va="top")
+            bbox=dict(fc="white", ec="none", alpha=0.9), zorder=12)
+    ia.text(0.02, 0.97, letter, transform=ia.transAxes, fontsize=14, fontweight="bold", va="top", zorder=12)
     K.scalebar(ia, 5, loc=(0.06, 0.12))
 
 handles = [Patch(fc=c, ec=c, label=l) for l, c in K.SRC_COLORS.items()] + [
