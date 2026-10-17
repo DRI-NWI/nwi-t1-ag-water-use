@@ -53,8 +53,8 @@ etof:
   linear_interp_limit: 1
   # Delivered-processor climatology fill for months still missing after the linear fill
   # (field x calendar-month mean of observed EToF within each window; scripts/01b builds
-  # them). Off pending sign-off; bridge variant v5_climatology_fill turns it on.
-  climatology_fill: false
+  # them). On in the final run (owner sign-off 2026-10-16); bridge variants v0-v4a turn it off.
+  climatology_fill: true
   climatology_windows: [[1985, 1991], [1992, 1997], [1998, 2003], [2004, 2009], [2010, 2015], [2016, 2021], [2022, 2025]]
 
 precipitation:
@@ -113,9 +113,10 @@ gw_subsidy:
   # (f = 0 for pure-GW fields in basins with < sw_use_min_acre_frac SW/mixed acreage).
   sw_filter: false
   sw_use_min_acre_frac: 0.10
-  # NetET is irrigation accounting: the subsidy only offsets NetET in irrigated
-  # field-months (%_IRRIGATED above this fraction, the delivered irrigation filter).
-  irrigated_only: true
+  # The subsidy is subtracted in every field-month, like Peff; irrigation status is applied
+  # downstream in the HA/county summaries (summaries.irrigated_only). true would restrict
+  # the subtraction itself to irrigated field-months.
+  irrigated_only: false
   irrigated_min_fraction: 0.5
   keep_depth_m: 16.0
   growing_season_months: [4, 5, 6, 7, 8, 9, 10]
@@ -128,6 +129,12 @@ carryforward:
   rooting_depth_m: 1.5
   reset_month: 1
   awc_floor: 0.0002
+
+summaries:
+  # HA and county summaries sum only irrigated field-years (IrrMapper %_IRRIGATED above
+  # this fraction; constant within a year). Field files keep every field-month.
+  irrigated_only: true
+  irrigated_min_fraction: 0.5
 
 outputs:
   write_field_csv: true

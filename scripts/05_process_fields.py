@@ -134,11 +134,33 @@ annual = []
 # Field-share percentages describe all fields in the unit, so they come from ALL.
 PCT = ["pct_fields_gw_equivalent", "pct_fields_sw_equivalent"]
 STATES = {"ACRES_FTR_GEOM", "Soil_Moisture_Cap_acre_ft", "Soil_Storage_acre_ft"}  # not additive over time
-nv_all = comps["ALL"][comps["ALL"]["IN_NV_COUNTY"].fillna(False).astype(bool)]
-pct_ha = aggregate.summarize(comps["ALL"], aggregate.HA_KEYS)[aggregate.HA_KEYS + PCT]
+FLUX = [c for c in water_balance.VOLUME_COLUMNS if c not in STATES]
+# HA/county summaries are irrigation accounting: only irrigated field-years (IrrMapper
+# %_IRRIGATED above the threshold) are summed. Field files keep every field-month.
+sm = cfg["summaries"]
+
+
+def summary_rows(d):
+    if not sm.get("irrigated_only", False):
+        return d
+    return d[d["%_IRRIGATED"] > float(sm["irrigated_min_fraction"])]
+
+
+checks["summaries_irrigated_only"] = bool(sm.get("irrigated_only", False))
+all_s = summary_rows(comps["ALL"])
+nv_all = all_s[all_s["IN_NV_COUNTY"].fillna(False).astype(bool)]
+pct_ha = aggregate.summarize(all_s, aggregate.HA_KEYS)[aggregate.HA_KEYS + PCT]
 pct_cty = aggregate.summarize(nv_all, aggregate.COUNTY_KEYS)[aggregate.COUNTY_KEYS + PCT]
 for comp in ["ALL", "GW", "SW"]:
-    d = comps[comp]
+    full = comps[comp]
+    # Statewide totals for both populations, straight from the field rows.
+    irr = full["%_IRRIGATED"] > float(sm["irrigated_min_fraction"])
+    for pop, rows in (("all_field_months", full), ("irrigated_field_months", full[irr])):
+        yr = rows.groupby("YEAR")[FLUX].sum()
+        yr.insert(0, "population", pop)
+        yr.insert(0, "component", comp)
+        annual.append(yr.reset_index())
+    d = summary_rows(full)
     ha = aggregate.summarize(d, aggregate.HA_KEYS, basin_year).drop(columns=PCT)
     ha = ha.merge(pct_ha, on=aggregate.HA_KEYS, how="left")
     ha.to_csv(out_sum / f"ha_summaries_{comp}.csv", index=False)
@@ -146,16 +168,12 @@ for comp in ["ALL", "GW", "SW"]:
     cty = aggregate.summarize(nv, aggregate.COUNTY_KEYS).drop(columns=PCT)
     cty = cty.merge(pct_cty, on=aggregate.COUNTY_KEYS, how="left")
     cty.to_csv(out_sum / f"county_summaries_{comp}.csv", index=False)
-    yr = ha.groupby("YEAR")[[c for c in water_balance.VOLUME_COLUMNS if c in ha.columns and c not in STATES]].sum()
-    yr["ACRES_FTR_GEOM_mean_month"] = ha.groupby(["YEAR", "MONTH"])["ACRES_FTR_GEOM"].sum().groupby("YEAR").mean()
-    yr.insert(0, "component", comp)
-    annual.append(yr.reset_index())
     if variant == "v4_final" and not args.no_field_files:
-        f = aggregate.field_output(d)
+        f = aggregate.field_output(full)
         f.to_parquet(P.fields / f"field_summaries_{comp}.parquet", index=False)
         if cfg["outputs"]["write_field_csv"]:
             f.to_csv(P.fields / f"field_summaries_{comp}.csv", index=False)
-    print(f"[05] {variant} {comp}: {len(d):,} rows written ({time.time() - t0:.0f}s)", flush=True)
+    print(f"[05] {variant} {comp}: {len(full):,} field rows, {len(d):,} in summaries ({time.time() - t0:.0f}s)", flush=True)
 pd.concat(annual).to_csv(out_sum / "statewide_annual_totals.csv", index=False)
 write_json(checks, out_sum / "run_checks.json")
 print(f"[05] {variant} done in {time.time() - t0:.0f}s")

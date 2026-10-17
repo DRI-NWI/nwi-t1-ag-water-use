@@ -47,6 +47,9 @@ Removed from the field files:
 
 ## HA and county summaries
 
+Rows: irrigated field-years only (`%_IRRIGATED` > 0.5, `summaries.irrigated_only`). The
+field files keep every field-month.
+
 Keys:
 
 - HA: `HA_NAME_CODE`, `HYD_AREA`, `HYD_AREA_N`, `YEAR`, `MONTH`.
