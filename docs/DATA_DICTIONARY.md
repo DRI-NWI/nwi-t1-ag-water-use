@@ -97,7 +97,8 @@ GW + SW = ALL for every volume.
 
 Each row is one HA (or one Nevada county) × year × month. Only irrigated field-years
 (`%_IRRIGATED` > 0.5) are included. HA totals include every field mapped to the HA,
-including the out-of-state fields of HAs that cross the state line.
+including the out-of-state fields of HAs that cross the state line. The `_NV` and
+`_outside_NV` columns give the two parts.
 
 | Keys | Columns |
 |---|---|
@@ -116,6 +117,7 @@ including the out-of-state fields of HAs that cross the state line.
 | `pct_acres_missing_eta` | % of acres with no ETa that month |
 | `pct_fields_gw_equivalent`, `pct_fields_sw_equivalent` | % of all fields in the unit, with mixed fields counted by their share; same values in ALL, GW and SW |
 | `mixed_sw_ratio`, `spi_sept12`, `spi_source`, `allocation_method` | Basin-year allocation for mixed fields (HA files only; blank where the HA has no mixed fields) |
+| `<col>_NV`, `<col>_outside_NV` | HA files only: the Nevada-field and out-of-state-field parts of `ACRES_FTR_GEOM`, `ETa_final_acre_ft`, `PPT_vol_acre_ft`, `Peff_vol_acre_ft`, `GW_subsidy_acre_ft`, `Carryforward_Used_acre_ft`, `NetET_final_acre_ft`, `AR_final_acre_ft` and `n_fields`. `_NV` + `_outside_NV` = the column |
 
 ## Other run files
 

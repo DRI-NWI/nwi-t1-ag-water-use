@@ -46,6 +46,11 @@ The full method is in [docs/METHODS.md](docs/METHODS.md).
 | **Applied water** | **1,567,158** | **836,991** | **730,166** |
 | Irrigated area (acres) | 540,966 | 304,192 | 236,773 |
 
+These totals include the out-of-state fields of HAs that cross the state line. Nevada
+fields alone have net ET 936,122 and applied water 1,366,930 acre-ft/yr. The out-of-state
+fields have net ET 129,526 and applied water 200,228, all GW. The HA summaries report
+both parts (`_NV`, `_outside_NV` columns).
+
 Maps, time series and checks for every variable are on these pages:
 - [docs/RESULTS.md](docs/RESULTS.md): the water balance, allocation, inputs, and irrigated area (IrrMapper vs XGBRF).
 - [docs/GW_SUBSIDY.md](docs/GW_SUBSIDY.md): the groundwater-ET subsidy and the depth-to-water comparison with Ma et al.

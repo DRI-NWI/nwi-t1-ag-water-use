@@ -161,7 +161,7 @@ for comp in ["ALL", "GW", "SW"]:
         yr.insert(0, "component", comp)
         annual.append(yr.reset_index())
     d = summary_rows(full)
-    ha = aggregate.summarize(d, aggregate.HA_KEYS, basin_year).drop(columns=PCT)
+    ha = aggregate.summarize(d, aggregate.HA_KEYS, basin_year, state_split=True).drop(columns=PCT)
     ha = ha.merge(pct_ha, on=aggregate.HA_KEYS, how="left")
     ha.to_csv(out_sum / f"ha_summaries_{comp}.csv", index=False)
     nv = d[d["IN_NV_COUNTY"].fillna(False).astype(bool)]

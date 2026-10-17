@@ -18,6 +18,19 @@ annual means.
 | Applied water | 1,567,158 | 836,991 | 730,166 |
 | Irrigated field area (acres) | 540,966 | 304,192 | 236,773 |
 
+Nevada fields and out-of-state fields (acre-ft/yr; out-of-state fields are treated as GW):
+
+| Term | Nevada fields | Out-of-state fields |
+|---|---:|---:|
+| ETa | 1,235,255 | 188,203 |
+| GW-ET subsidy | 24,043 | 10,691 |
+| Net ET | 936,122 | 129,526 |
+| Applied water | 1,366,930 | 200,228 |
+
+The largest out-of-state net ET is in Surprise Valley (014, California side; 48,895
+acre-ft/yr), Antelope Valley (106; 17,188), Snake Valley (195; 9,444), Colorado Valley
+(213; 9,212) and Fish Lake Valley (117; 7,665).
+
 Depths over the irrigated area: ETa 2.63 ft, net ET 1.97 ft, applied water 2.90 ft.
 Irrigated area ranges from 338,920 acres (1992) to 682,724 acres (2019).
 
