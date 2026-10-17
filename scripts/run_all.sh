@@ -12,9 +12,8 @@ $PY 03_compute_spi.py
 $PY_EXACT 04a_dtw_zonal.py
 $PY 04b_texture_polaris.py
 $PY 04c_gw_fraction.py
-for v in v0a_reproduce_0823_no_static v0b_reproduce_0823_static153 v1_basin_overrides v2_prism_spi_d24 v3_prism_ppt_otter_peff; do
+for v in v0a_reproduce_0823_no_static v0b_reproduce_0823_static153 v1_basin_overrides v2_prism_spi_d24 v3_prism_ppt_otter_peff v4a_gw_subsidy_no_climatology; do
   $PY 05_process_fields.py --variant "$v"
 done
 $PY 05_process_fields.py
-$PY 05_process_fields.py --variant v5_climatology_fill
 $PY 07_bridge_qa.py

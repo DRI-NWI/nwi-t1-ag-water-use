@@ -19,12 +19,13 @@ complete. The hydrographic area comes from the boundary `Basin` attribute.
   - −999 → NaN; `ETA_MM == 0` → NaN.
   - EToF = ETa / ETo. One-month gaps are filled by linear interpolation.
   - Longer gaps stay missing and are flagged `unfilled_missing` (177,673 field-months).
-  - Optional climatology fill (`etof.climatology_fill`, off in the final run; bridge
-    variant `v5_climatology_fill`). `01b_etof_climatology.py` builds, from the base table,
+  - Climatology fill (`etof.climatology_fill`, on in the final run; the bridge variants
+    up to `v4a_gw_subsidy_no_climatology` turn it off). `01b_etof_climatology.py` builds, from the base table,
     each field's mean observed EToF (clipped to 0–1.5) per calendar month within each
     window (1985–91, 1992–97, 1998–2003, 2004–09, 2010–15, 2016–21, 2022–25). Step 05
     fills every `unfilled_missing` month from its window and flags it `climatology`.
-    OTTER Peff is not re-run: it already forward-fills EToF over these months.
+    OTTER (step 02) uses the same climatology-filled EToF, so ETa and Peff see the same ET.
+    1,194 field-months stay missing (no observed EToF for that field, month and window).
   - ETa volume = EToF_interpolated × ETO_MM × acres.
 - **PRISM precipitation.** Daily PRISM 800 m precipitation at each field centroid is summed
   to field-months. It was extracted on Earth Engine project `nasa-water` (config
@@ -79,14 +80,13 @@ Per field-month, on the whole field:
 
 ```
 NetET_pre_subsidy = ETa − Peff_OTTER
-GW_subsidy        = min(f × ETa, max(NetET_pre_subsidy, 0))   if %_IRRIGATED > 0.5, else 0
+GW_subsidy        = min(f × ETa, max(NetET_pre_subsidy, 0))
 NetET_intermediate = NetET_pre_subsidy − GW_subsidy
 ```
 
-NetET is irrigation-accounting water, so the subsidy only offsets it in irrigated
-field-months. `GW_subsidy_potential_acre_ft` (f × ETa) is still reported for every month.
-The subsidy only offsets a positive requirement, so groundwater is never stored as soil
-water.
+Like Peff, the subsidy is subtracted in every field-month; the field files apply no
+irrigation filter. It only offsets a positive requirement, so groundwater is never stored
+as soil water.
 
 **Winter carry-forward** follows the delivered algorithm:
 
@@ -117,7 +117,12 @@ Then:
 
 ## 06 Summaries
 
-HA and county summaries follow `docs/COLUMN_POLICY.md`.
+HA and county summaries are irrigation accounting. They sum only irrigated field-years:
+IrrMapper `%_IRRIGATED` > 0.5 (`summaries.irrigated_only`). `%_IRRIGATED` is constant
+within a field-year, so a field enters a year's summaries in all twelve months or none.
+Every volume of an included field-month counts, including its GW subsidy and
+carry-forward. Columns follow `docs/COLUMN_POLICY.md`. `statewide_annual_totals.csv`
+reports both populations (`all_field_months`, `irrigated_field_months`).
 
 ## 07 Reproduction gate and bridge
 
@@ -127,17 +132,20 @@ HA and county summaries follow `docs/COLUMN_POLICY.md`.
 - 0.85 × PPT effective precipitation;
 - gridMET SPI file ending 2023;
 - no basin overrides;
-- no subsidy.
+- no subsidy;
+- no climatology fill and no irrigation filter in the summaries.
 
 It reproduces every HA × year × month cell of the 2026-08-23 HA summaries (ETa, NetET, AR,
 acres) to within 1e-11 acre-ft.
 
-**Bridge.** Variants v0b → v4 then add one change at a time:
+**Bridge.** Variants v0b → v4_final then add one change at a time:
 
-1. Diamond Valley static override.
-2. Fish Lake dynamic rule.
-3. PRISM SPI.
-4. PRISM precipitation + OTTER Peff.
-5. GW subsidy.
+1. Diamond Valley static override (v0b).
+2. Fish Lake dynamic rule (v1).
+3. PRISM SPI (v2).
+4. PRISM precipitation + OTTER Peff (v3).
+5. GW subsidy (v4a).
+6. EToF climatology fill (v4_final).
 
-`bridge_table.csv` gives the statewide annual-mean effect of each change.
+`bridge_table.csv` gives the statewide annual-mean effect of each change, for all
+field-months and for irrigated field-years.
