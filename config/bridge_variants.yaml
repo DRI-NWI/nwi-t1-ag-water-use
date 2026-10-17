@@ -1,0 +1,28 @@
+# Bridge from the delivered 2026-08-23 package to the final run, one change at a time.
+# Each variant is a set of overrides on config/nwi_t1_final.yaml. Variants only write
+# HA summaries and statewide totals; the final variant writes everything.
+variants:
+  v0a_reproduce_0823_no_static:
+    precipitation: {source: export}
+    effective_precipitation: {source: export_085}
+    spi: {source: legacy}
+    allocation: {apply_static_overrides: false, apply_dynamic_overrides: false}
+    gw_subsidy: {enabled: false}
+  v0b_reproduce_0823_static153:
+    precipitation: {source: export}
+    effective_precipitation: {source: export_085}
+    spi: {source: legacy}
+    allocation: {apply_static_overrides: true, apply_dynamic_overrides: false}
+    gw_subsidy: {enabled: false}
+  v1_basin_overrides:
+    precipitation: {source: export}
+    effective_precipitation: {source: export_085}
+    spi: {source: legacy}
+    gw_subsidy: {enabled: false}
+  v2_prism_spi_d24:
+    precipitation: {source: export}
+    effective_precipitation: {source: export_085}
+    gw_subsidy: {enabled: false}
+  v3_prism_ppt_otter_peff:
+    gw_subsidy: {enabled: false}
+  v4_final: {}

@@ -1,0 +1,21 @@
+name: nwi-t1-ag-water-use
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy
+  - pandas>=2.2
+  - pyarrow
+  - duckdb>=1.1
+  - numba
+  - geopandas
+  - pyogrio
+  - shapely>=2
+  - rasterio
+  - exactextract       # step 04a only
+  - earthengine-api    # step 04b only (POLARIS texture)
+  - pyyaml
+  - pytest
+  - pip
+  - pip:
+      - climate-indices==2.4.0
