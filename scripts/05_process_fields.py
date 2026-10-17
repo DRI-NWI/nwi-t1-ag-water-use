@@ -16,7 +16,7 @@ import pandas as pd
 import yaml
 
 from _common import REPO, parse, write_json
-from nwi_agwu import aggregate, allocation, config as C, fields, water_balance
+from nwi_agwu import aggregate, allocation, config as C, etof, fields, water_balance
 
 
 def extra(ap):
@@ -56,6 +56,10 @@ keep_attr = ["NWI_ID", "NWI_PARENT", "HYD_AREA", "HYD_AREA_N", "HA_NAME_CODE", "
 df = base.merge(attrs[keep_attr], on="NWI_ID", how="left", validate="many_to_one")
 df = df.sort_values(["NWI_ID", "YEAR", "MONTH"], kind="mergesort").reset_index(drop=True)
 df["DATE"] = pd.to_datetime(dict(year=df.YEAR, month=df.MONTH, day=1)).dt.strftime("%Y-%m-%d")
+interp_before = df["interpolation_method"].value_counts().to_dict()
+if cfg["etof"].get("climatology_fill", False):
+    windows = [tuple(w) for w in cfg["etof"]["climatology_windows"]]
+    df = etof.apply_climatology_fill(df, etof.load_climatologies(P.etof_climatology, windows), windows)
 
 # Precipitation and effective precipitation
 if cfg["precipitation"]["source"] == "prism":
@@ -104,6 +108,20 @@ for c in ["ETa_final_acre_ft", "NetET_final_acre_ft", "AR_final_acre_ft", "GW_su
         raise AssertionError(f"GW + SW != ALL for {c}")
 a = comps["ALL"]
 checks["fields"] = int(a.NWI_ID.nunique())
+checks["etof_climatology_fill"] = bool(cfg["etof"].get("climatology_fill", False))
+checks["interpolation_method_before_climatology"] = {k: int(v) for k, v in interp_before.items()}
+checks["interpolation_method"] = {k: int(v) for k, v in a["interpolation_method"].value_counts().items()}
+checks["unfilled_missing_by_year"] = {int(k): int(v) for k, v in
+                                      a.loc[a.interpolation_method.eq("unfilled_missing"), "YEAR"].value_counts().sort_index().items()}
+# Carry-forward chains: a missing NetET month ends the chain; the next valid month restarts
+# storage at zero even when it is not the January reset.
+net_ok = a["NetET_intermediate_acre_ft"].notna().to_numpy()
+first = np.r_[True, a["NWI_ID"].to_numpy()[1:] != a["NWI_ID"].to_numpy()[:-1]]
+prev_ok = np.r_[True, net_ok[:-1]] | first
+forced = net_ok & ~prev_ok & (a["MONTH"].to_numpy() != cfg["carryforward"]["reset_month"])
+checks["carryforward_chains"] = {"netet_missing_months": int((~net_ok).sum()),
+                                 "forced_restarts_non_reset_month": int(forced.sum()),
+                                 "fields_with_forced_restart": int(a.loc[forced, "NWI_ID"].nunique())}
 checks["peff_method_fields"] = a.groupby("peff_method")["NWI_ID"].nunique().to_dict()
 checks["spi_missing_basin_years"] = int(ratios["spi_status"].eq("missing").sum())
 

@@ -60,6 +60,7 @@ def summarize(df: pd.DataFrame, keys: list[str], basin_year: pd.DataFrame | None
     tmp["n_mixed_fields"] = (src == 3).astype(int)
     tmp["n_fields_irr_src_assumed"] = d["IRR_SRC_ASSUMED"].astype(bool).astype(int)
     tmp["n_fields_eta_interpolated"] = d["interpolation_method"].eq("linear_1month").astype(int)
+    tmp["n_fields_eta_climatology"] = d["interpolation_method"].eq("climatology").astype(int)
     tmp["n_fields_eta_missing"] = d["interpolation_method"].eq("unfilled_missing").astype(int)
     tmp["n_fields_peff_fallback"] = d["peff_method"].ne("otter").astype(int) if "peff_method" in d else 0
     tmp["n_fields_gw_subsidy"] = (d["gw_frac"] > 0).astype(int)

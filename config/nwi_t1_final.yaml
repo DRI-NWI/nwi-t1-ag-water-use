@@ -51,6 +51,11 @@ etof:
   # Same rules as the delivered processor: -999 -> NaN, ETA_MM == 0 -> NaN,
   # EToF = ETA/ETO, one-month linear interpolation.
   linear_interp_limit: 1
+  # Delivered-processor climatology fill for months still missing after the linear fill
+  # (field x calendar-month mean of observed EToF within each window; scripts/01b builds
+  # them). Off pending sign-off; bridge variant v5_climatology_fill turns it on.
+  climatology_fill: false
+  climatology_windows: [[1985, 1991], [1992, 1997], [1998, 2003], [2004, 2009], [2010, 2015], [2016, 2021], [2022, 2025]]
 
 precipitation:
   # prism: daily PRISM 800 m summed per field-month. export: the OpenET export's PPT_MM.
@@ -103,9 +108,15 @@ gw_subsidy:
   enabled: true
   model: tan
   param_mode: crop_et0
-  # Pure-GW fields in basins with < 10% SW/mixed acreage get f = 0 (nwi-gw-subsidy rule).
-  sw_filter: true
+  # Eligibility is per field from its water right (IRR_SRC GW, SW or mixed; non-NV fields
+  # assumed GW), not a basin test. sw_filter: true restores the nwi-gw-subsidy rule
+  # (f = 0 for pure-GW fields in basins with < sw_use_min_acre_frac SW/mixed acreage).
+  sw_filter: false
   sw_use_min_acre_frac: 0.10
+  # NetET is irrigation accounting: the subsidy only offsets NetET in irrigated
+  # field-months (%_IRRIGATED above this fraction, the delivered irrigation filter).
+  irrigated_only: true
+  irrigated_min_fraction: 0.5
   keep_depth_m: 16.0
   growing_season_months: [4, 5, 6, 7, 8, 9, 10]
   # positive_netet_only: subsidy = min(f x ETa, max(NetET, 0)) before carry-forward,

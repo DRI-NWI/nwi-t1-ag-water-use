@@ -26,3 +26,6 @@ variants:
   v3_prism_ppt_otter_peff:
     gw_subsidy: {enabled: false}
   v4_final: {}
+  # Final settings plus the EToF climatology fill (opt-in; not part of the bridge to v4).
+  v5_climatology_fill:
+    etof: {climatology_fill: true}
