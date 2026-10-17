@@ -4,10 +4,11 @@ f = coverage-weighted mean over the field's DTW pixels of Tan et al. (2025) f(d)
 (d_dec, d_ext, p) from POLARIS texture, CDL rooting depth (CROP_major) and the field's
 growing-season mean ETo (Apr-Oct). Fields with no shallow pixels get f = 0.
 
-SW filter (nwi-gw-subsidy basins.field_keep): f is set to 0 for pure-GW fields in
+Eligibility is per field from its water right (every GW, SW or mixed field; non-NV
+fields are assumed GW). The optional SW filter (gw_subsidy.sw_filter, off in the final
+configuration; nwi-gw-subsidy basins.field_keep) sets f = 0 for pure-GW fields in
 basins where SW or mixed fields hold less than sw_use_min_acre_frac of the acreage.
-The source evaluated it on irrigated (>50%) field records; here it uses the boundary
-layer's source class and field acreage after the configured basin overrides.
+``sw_filter_keep`` records what that test would decide either way.
 """
 
 from __future__ import annotations
