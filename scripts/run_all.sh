@@ -6,6 +6,7 @@ cd "$(dirname "$0")"
 PY=${PY:-python}
 PY_EXACT=${PY_EXACT:-$PY}
 $PY 01_build_inputs.py
+$PY 01b_etof_climatology.py
 $PY 02_run_otter.py
 $PY 03_compute_spi.py
 $PY_EXACT 04a_dtw_zonal.py
@@ -15,4 +16,5 @@ for v in v0a_reproduce_0823_no_static v0b_reproduce_0823_static153 v1_basin_over
   $PY 05_process_fields.py --variant "$v"
 done
 $PY 05_process_fields.py
+$PY 05_process_fields.py --variant v5_climatology_fill
 $PY 07_bridge_qa.py

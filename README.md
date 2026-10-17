@@ -38,6 +38,7 @@ PY=python PY_EXACT=python ./run_all.sh
 | Step | Script | Output (under `<output_root>/<run_id>/`) |
 |---|---|---|
 | 01 | `01_build_inputs.py` | `01_inputs/`: field attributes, PRISM monthly, field-month EToF/ETa base |
+| 01b | `01b_etof_climatology.py` | `01_inputs/etof_climatology/`: per-window field EToF climatologies (used only with `etof.climatology_fill`) |
 | 02 | `02_run_otter.py` | `02_otter/`: monthly OTTER Peff per field |
 | 03 | `03_compute_spi.py` | `03_spi/`: PRISM SPI by region, basin-year Sept SPI-12 |
 | 04a–c | `04a_dtw_zonal.py`, `04b_texture_polaris.py`, `04c_gw_fraction.py` | `04_gw_subsidy/`: DTW per field, POLARIS texture, groundwater fraction f |

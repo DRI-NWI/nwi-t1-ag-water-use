@@ -7,7 +7,16 @@ process_field_summaries.py, see docs/VENDORED_SOURCES.md):
   * One-month gaps filled by linear interpolation per field (pandas
     ``interpolate(method='linear', limit=1)``), flagged ``linear_1month``.
   * Months that remain missing are flagged ``unfilled_missing``.
-No EToF climatology was available for the 2026-08-20 population, so none is used.
+
+Optional EToF climatology fill (config ``etof.climatology_fill``, off in the final run):
+  * Climatologies follow calculate_field_climatologies.calculate_etof_climatologies:
+    observed EToF clipped to [0, 1.5], mean per field and calendar month within each
+    gap window, clipped again. No climatology existed for the 2026-08-20 population,
+    so they are built from step 01's field_month_base.parquet (scripts/01b).
+  * apply_climatology_fill follows apply_climatology_gap_filling_etof: every month still
+    ``unfilled_missing`` after the linear fill takes the field's climatology for that
+    calendar month from the window containing its year (nearest window outside them);
+    flagged ``climatology``. Months with no climatology stay ``unfilled_missing``.
 """
 
 from __future__ import annotations
@@ -22,6 +31,9 @@ from .units import mm_to_acft
 EXPORT_COLUMNS = ["NWI_ID", "OPENET_ID", "STATE", "irr_eff", "ITYPE", "YEAR", "MONTH", "ETA_MM", "PPT_MM", "EFF_PPT_MM",
                   "ETO_MM", "%_IRRIGATED", "ACRES_FTR_GEOM", "ACRES_ALL", "ACRES_IRR"]
 SENTINEL_COLUMNS = ["ETA_MM", "PPT_MM", "EFF_PPT_MM", "ETO_MM"]
+GAP_WINDOWS = [(1985, 1991), (1992, 1997), (1998, 2003), (2004, 2009), (2010, 2015), (2016, 2021), (2022, 2025)]
+CLIMO_COLUMNS = [f"EToF_climo_{m:02d}" for m in range(1, 13)]
+ETOF_CLIP = (0.0, 1.5)
 
 
 def load_ensemble(ensemble_dir: str, start: int, end: int) -> pd.DataFrame:
@@ -58,3 +70,71 @@ def build_etof(df: pd.DataFrame, limit: int = 1) -> pd.DataFrame:
     out["ETA_MM_post_interp"] = out["EToF_interpolated"] * out["ETO_MM"]
     out["ETa_vol_acre_ft"] = mm_to_acft(out["ETA_MM_post_interp"], out["ACRES_FTR_GEOM"])
     return out
+
+
+def window_key(year: int, windows) -> str:
+    """Window containing year, else the nearest one (get_field_climatology rule)."""
+    for a, b in windows:
+        if a <= year <= b:
+            return f"{a}_{b}"
+    a, b = min(windows, key=lambda w: min(abs(year - w[0]), abs(year - w[1])))
+    return f"{a}_{b}"
+
+
+def build_climatologies(base: pd.DataFrame, attrs: pd.DataFrame, windows=GAP_WINDOWS) -> dict[str, pd.DataFrame]:
+    """Per-window field x calendar-month mean of observed EToF (delivered file shape:
+    OPENET_ID index, HA_NAME_CODE, NWI_ID, EToF_climo_01..12)."""
+    e = base[["NWI_ID", "YEAR", "MONTH", "EToF"]].copy()
+    e["EToF"] = e["EToF"].clip(*ETOF_CLIP)
+    e = e[e["EToF"].notna()]
+    ids = base[["NWI_ID", "OPENET_ID"]].drop_duplicates("NWI_ID").merge(
+        attrs[["NWI_ID", "HA_NAME_CODE"]], on="NWI_ID", how="left", validate="one_to_one")
+    out = {}
+    for a, b in windows:
+        w = e[e["YEAR"].between(a, b)]
+        c = w.groupby(["NWI_ID", "MONTH"])["EToF"].mean().unstack("MONTH").clip(*ETOF_CLIP)
+        c = c.reindex(columns=range(1, 13))
+        c.columns = CLIMO_COLUMNS
+        c = ids.merge(c.reset_index(), on="NWI_ID", how="inner").set_index("OPENET_ID")
+        out[f"{a}_{b}"] = c[["HA_NAME_CODE", "NWI_ID"] + CLIMO_COLUMNS]
+    return out
+
+
+def write_climatologies(climos: dict[str, pd.DataFrame], out_dir: Path):
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for k, c in climos.items():
+        c.to_csv(out_dir / f"etof_climatology_{k}.csv")
+
+
+def load_climatologies(climo_dir: Path, windows=GAP_WINDOWS) -> dict[str, pd.DataFrame]:
+    out = {}
+    for a, b in windows:
+        f = Path(climo_dir) / f"etof_climatology_{a}_{b}.csv"
+        if not f.exists():
+            raise FileNotFoundError(f"{f} missing; run scripts/01b_etof_climatology.py")
+        out[f"{a}_{b}"] = pd.read_csv(f, index_col="OPENET_ID")
+    return out
+
+
+def apply_climatology_fill(df: pd.DataFrame, climos: dict[str, pd.DataFrame], windows=GAP_WINDOWS) -> pd.DataFrame:
+    """Fill ``unfilled_missing`` months from the field's window climatology, in place."""
+    gaps = df.index[df["interpolation_method"].eq("unfilled_missing")]
+    if len(gaps) == 0:
+        return df
+    long = []
+    for k, c in climos.items():
+        m = c.melt(id_vars=["NWI_ID"], value_vars=CLIMO_COLUMNS, var_name="MONTH", value_name="climo")
+        m["MONTH"] = m["MONTH"].str[-2:].astype(int)
+        m["window"] = k
+        long.append(m.dropna(subset=["climo"]))
+    long = pd.concat(long, ignore_index=True)
+    g = df.loc[gaps, ["NWI_ID", "YEAR", "MONTH"]]
+    keys = {y: window_key(int(y), windows) for y in g["YEAR"].unique()}
+    g = g.assign(window=g["YEAR"].map(keys), _row=gaps)
+    g = g.merge(long, on=["NWI_ID", "window", "MONTH"], how="inner", validate="many_to_one")
+    rows = g["_row"].to_numpy()
+    df.loc[rows, "EToF_interpolated"] = g["climo"].to_numpy()
+    df.loc[rows, "interpolation_method"] = "climatology"
+    df.loc[rows, "ETA_MM_post_interp"] = df.loc[rows, "EToF_interpolated"] * df.loc[rows, "ETO_MM"]
+    df.loc[rows, "ETa_vol_acre_ft"] = mm_to_acft(df.loc[rows, "ETA_MM_post_interp"], df.loc[rows, "ACRES_FTR_GEOM"])
+    return df

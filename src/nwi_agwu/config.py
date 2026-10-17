@@ -56,6 +56,7 @@ class RunPaths:
         self.field_wtd_pixels = self.subsidy / "field_wtd_pixels.parquet"
         self.field_texture = self.subsidy / "field_texture.csv"
         self.field_gwfrac = self.subsidy / "field_gwfrac.parquet"
+        self.etof_climatology = self.inputs / "etof_climatology"
 
     def make(self):
         for p in [self.inputs, self.otter, self.spi, self.subsidy, self.fields,

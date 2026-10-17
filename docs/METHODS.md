@@ -19,7 +19,12 @@ complete. The hydrographic area comes from the boundary `Basin` attribute.
   - −999 → NaN; `ETA_MM == 0` → NaN.
   - EToF = ETa / ETo. One-month gaps are filled by linear interpolation.
   - Longer gaps stay missing and are flagged `unfilled_missing` (177,673 field-months).
-  - No EToF climatology exists for this population.
+  - Optional climatology fill (`etof.climatology_fill`, off in the final run; bridge
+    variant `v5_climatology_fill`). `01b_etof_climatology.py` builds, from the base table,
+    each field's mean observed EToF (clipped to 0–1.5) per calendar month within each
+    window (1985–91, 1992–97, 1998–2003, 2004–09, 2010–15, 2016–21, 2022–25). Step 05
+    fills every `unfilled_missing` month from its window and flags it `climatology`.
+    OTTER Peff is not re-run: it already forward-fills EToF over these months.
   - ETa volume = EToF_interpolated × ETO_MM × acres.
 - **PRISM precipitation.** Daily PRISM 800 m precipitation at each field centroid is summed
   to field-months. It was extracted on Earth Engine project `nasa-water` (config

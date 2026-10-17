@@ -42,7 +42,8 @@ rc.to_csv(P.qa / "reproduction_check.csv", index=False)
 print(rc.to_string(index=False))
 
 # Bridge: statewide annual mean (sum over years / n years) per variant and component.
-order = ["v0a_reproduce_0823_no_static", "v1_basin_overrides", "v2_prism_spi_d24", "v3_prism_ppt_otter_peff", "v4_final"]
+order = ["v0a_reproduce_0823_no_static", "v1_basin_overrides", "v2_prism_spi_d24", "v3_prism_ppt_otter_peff", "v4_final",
+         "v5_climatology_fill"]
 cols = ["ETa_final_acre_ft", "PPT_vol_acre_ft", "Peff_vol_acre_ft", "GW_subsidy_acre_ft", "Carryforward_Used_acre_ft",
         "NetET_final_acre_ft", "AR_final_acre_ft"]
 br = []
