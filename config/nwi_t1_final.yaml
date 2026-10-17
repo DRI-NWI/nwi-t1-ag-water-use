@@ -1,0 +1,123 @@
+# NWI T1 agricultural water use: final field-processing configuration.
+#
+# One file drives every step in scripts/. Paths point at the confirmed source
+# versions listed in docs/PROVENANCE.md. Large outputs are written outside the
+# repository under run.output_root/run.run_id.
+
+run:
+  run_id: nwi_t1_final_20261016
+  output_root: /Users/Peter.ReVelle@dri.edu/github/agricultural-water-artifacts/nwi-t1-ag-water-use
+  start_year: 1985
+  end_year: 2025
+  # all_fields = the complete 2026-08-20 boundary population (29,338 fields, six
+  # states). Non-Nevada fields have no source attribute and no DTW coverage;
+  # both are flagged on every row.
+  scope: all_fields
+
+inputs:
+  fields_gpkg: /Users/Peter.ReVelle@dri.edu/Documents/projects/NWI/shapefiles/nevada_agricultural_field_boundaries_20260820.gpkg
+  ensemble_dir: /Users/Peter.ReVelle@dri.edu/github/agricultural-water-forecasting/data/openet/nwi_field_summaries_20260820/irrmapper/ENSEMBLE
+  # Daily PRISM 800 m precipitation (field centroid) and OpenET gridMET ETo,
+  # extracted with ee_extract_nv_20260820.toml (project nasa-water).
+  met_daily_dir: /Users/Peter.ReVelle@dri.edu/github/agricultural-water-forecasting/scripts/scripts_otter/data_folder/nwi_field_export_20260820/met
+  otter_static_soils: /Users/Peter.ReVelle@dri.edu/github/agricultural-water-forecasting/outputs/nv_otter_20260917/soil_reextract_nm_20260918/soils_otter_static_nm_base_fill.parquet
+  awc_table: /Users/Peter.ReVelle@dri.edu/github/agricultural-water-forecasting/data/openet/nwi_field_summaries_20260820/awc_extraction/otter_awc_august_merged.csv
+  # PRISM monthly precipitation over each HA and each SW contributing area (1981-2025).
+  prism_region_ppt: /Users/Peter.ReVelle@dri.edu/github/agricultural-water-projects/mixed-field-allocation/artifacts/sw_contributing_area_ppt_20260925/prism_ppt/sw_ha_prism_ppt_monthly.csv
+  # SPI computed from the same series by the mixed-field review (K); used only as a check.
+  prism_spi_reference: /Users/Peter.ReVelle@dri.edu/github/agricultural-water-projects/mixed-field-allocation/artifacts/model_defensibility_review_20260925/K_prism_spi/tables/prism_spi_monthly_ha_and_contributing.csv
+  # gridMET ag-footprint SPI used by the delivered 2026-08-23 package (reproduction only).
+  legacy_spi: /Users/Peter.ReVelle@dri.edu/Documents/projects/NWI/Field_summaries/6_3_25_results/summaries/with_temperature/drought_indices/basin_spi_extended_1985_2023.csv
+  county_assignment: /Users/Peter.ReVelle@dri.edu/Documents/projects/NWI/Will_documentation/2026-09-02_county_NV/county_assignment_audit.csv
+  dtw_tif: /Users/Peter.ReVelle@dri.edu/Documents/projects/NWI/dtw/nv_dtw_parity_statewide_100m/epsg5070/nv_dtw_parity_statewide_100m_epsg5070.tif
+  dtw_sigma_tif: /Users/Peter.ReVelle@dri.edu/Documents/projects/NWI/dtw/nv_dtw_parity_statewide_100m/epsg5070/nv_sigma_parity_statewide_100m_epsg5070.tif
+  # POLARIS 0-100 cm texture cached by the 2026-10-12 parity subsidy run (keyed by OPENET_ID).
+  field_texture_csv: /Users/Peter.ReVelle@dri.edu/Documents/projects/NWI/dtw/nv_dtw_parity_statewide_100m/epsg5070/gw_subsidy_parity_vs_ma/inputs/field_texture.csv
+  tan_params_csv: /Users/Peter.ReVelle@dri.edu/github/nwi-gw-subsidy/Data/Inputs/tan2025_params.csv
+  # Delivered package used for the reproduction gate and the bridge table.
+  reference_package_dir: /Users/Peter.ReVelle@dri.edu/Documents/projects/NWI/Will_documentation/2026-08-23
+
+earth_engine:
+  project: nasa-water
+
+field_attributes:
+  # Missing source attributes (non-Nevada fields) are assumed and flagged.
+  assume_missing: true
+  assumed_irr_src: 1        # groundwater
+  assumed_irr_eff: 0.75
+
+etof:
+  # Same rules as the delivered processor: -999 -> NaN, ETA_MM == 0 -> NaN,
+  # EToF = ETA/ETO, one-month linear interpolation.
+  linear_interp_limit: 1
+
+precipitation:
+  # prism: daily PRISM 800 m summed per field-month. export: the OpenET export's PPT_MM.
+  source: prism
+
+effective_precipitation:
+  # otter: monthly OTTER Peff per field. export_085: the export's 0.85 x PPT (delivered package).
+  source: otter
+  otter:
+    init_dru_frac: 0.5
+    init_drl_frac: 0.5
+    mad_frac: 0.5
+    # Missing monthly EToF is forward-filled over the continuous history (NM05 rule).
+    etof_fill: ffill
+    # Fields whose static soil parameters are invalid fall back to 0.85 x PPT; flagged.
+    invalid_static_fallback: ppt_085
+
+spi:
+  # prism_d24: PRISM SW contributing area where one exists, else PRISM HA-wide
+  #            (mixed-field review decision D24, confirmed in D29).
+  # legacy:    the gridMET ag-footprint file the delivered package used.
+  source: prism_d24
+  timescale_months: 12
+  reference_month: 9
+  calibration_start: 1981
+  calibration_end: 2024
+  distribution: gamma
+
+allocation:
+  min_sw_ratio: 0.2
+  max_sw_ratio: 0.8
+  spi_min: -2.0
+  spi_max: 2.0
+  center_sw_ratio: 0.5
+  # Static overrides: share of mixed acreage to GW (1.0 reclassifies mixed -> GW).
+  static_overrides:
+    "153": 1.0
+  # Dynamic per-basin rules (Fish Lake Valley, Rush & Katzer anchor).
+  dynamic_overrides:
+    "117":
+      min_sw_ratio: 0.2
+      max_sw_ratio: 0.7
+      center_sw_ratio: 0.36
+      fallback_ratio: 0.36
+      allocation_method: rush_katzer_spi12
+  apply_static_overrides: true
+  apply_dynamic_overrides: true
+
+gw_subsidy:
+  enabled: true
+  model: tan
+  param_mode: crop_et0
+  # Pure-GW fields in basins with < 10% SW/mixed acreage get f = 0 (nwi-gw-subsidy rule).
+  sw_filter: true
+  sw_use_min_acre_frac: 0.10
+  keep_depth_m: 16.0
+  growing_season_months: [4, 5, 6, 7, 8, 9, 10]
+  # positive_netet_only: subsidy = min(f x ETa, max(NetET, 0)) before carry-forward,
+  # so groundwater never enters soil storage. plain: NetET - f x ETa.
+  offset: positive_netet_only
+
+carryforward:
+  enabled: true
+  rooting_depth_m: 1.5
+  reset_month: 1
+  awc_floor: 0.0002
+
+outputs:
+  write_field_csv: true
+  write_field_parquet: true
+  components: [ALL, GW, SW]
