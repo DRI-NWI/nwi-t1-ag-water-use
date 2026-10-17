@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Step 01b: per-window field EToF climatologies from step 01's field_month_base.parquet.
 
-Used only when etof.climatology_fill is on (step 05). Same rules and file shape as the
-delivered calculate_etof_climatologies (see nwi_agwu/etof.py).
+Used when etof.climatology_fill is on (steps 02 and 05). Rules in nwi_agwu/etof.py.
 Outputs: run/01_inputs/etof_climatology/etof_climatology_{start}_{end}.csv, climatology_coverage.csv
 """
 

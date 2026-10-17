@@ -1,8 +1,7 @@
 """Field attributes from the 2026-08-20 boundary layer.
 
-The boundary layer is the authority for source type (IRR_SRC), irrigation
-efficiency, and the hydrographic area (the ``Basin`` attribute), as in the
-delivered processor (``enforce_boundary_basin_mapping``).
+The boundary layer gives each field its source type (IRR_SRC) and hydrographic area
+(the ``Basin`` attribute).
 """
 
 from __future__ import annotations
@@ -33,8 +32,7 @@ def load_attributes(gpkg: str, cfg: dict, export_attrs: pd.DataFrame | None = No
     """Return (attributes, report). One row per NWI_ID.
 
     ``export_attrs`` (NWI_ID, irr_eff, ITYPE from the OpenET export) take precedence over
-    the boundary layer, as in the delivered processor (merge_field_attributes keeps
-    non-null export values and only fills nulls from the boundary layer).
+    the boundary layer, which only fills nulls.
     """
     import geopandas as gpd
 
