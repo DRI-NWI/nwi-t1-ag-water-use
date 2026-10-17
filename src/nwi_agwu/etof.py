@@ -11,8 +11,8 @@ process_field_summaries.py, see docs/VENDORED_SOURCES.md):
 Optional EToF climatology fill (config ``etof.climatology_fill``, off in the final run):
   * Climatologies follow calculate_field_climatologies.calculate_etof_climatologies:
     observed EToF clipped to [0, 1.5], mean per field and calendar month within each
-    gap window, clipped again. No climatology existed for the 2026-08-20 population,
-    so they are built from step 01's field_month_base.parquet (scripts/01b).
+    gap window, clipped again. Earlier climatology sets are NV-only and keyed by May-era
+    OPENET_IDs that do not match the 2026-08-20 population, so these are built from step 01's field_month_base.parquet (scripts/01b).
   * apply_climatology_fill follows apply_climatology_gap_filling_etof: every month still
     ``unfilled_missing`` after the linear fill takes the field's climatology for that
     calendar month from the window containing its year (nearest window outside them);
