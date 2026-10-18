@@ -6,7 +6,7 @@
 # repository under run.output_root/run.run_id.
 
 run:
-  run_id: nwi_t1_final_20261016
+  run_id: nwi_t1_final_20261018
   output_root: /Users/Peter.ReVelle@dri.edu/github/agricultural-water-artifacts/nwi-t1-ag-water-use
   start_year: 1985
   end_year: 2025
