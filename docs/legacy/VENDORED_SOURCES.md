@@ -1,30 +1,30 @@
-# Vendored code
+# Code sources
 
-This repo does not import code from other repositories at runtime. Each piece below was
-copied in. The table records where it came from and what changed.
+The scripts in `scripts/` are copies of the original scripts, edited in place. The first
+copy is committed unmodified (commit 9b60d5d, "Add original scripts, unmodified"). Every
+later change is marked `# NWI T1` in the code, so this command shows each edit:
 
-| Module here | Source | Source version | Changes |
-|---|---|---|---|
-| `nwi_agwu/etof.py` | `agricultural-water-forecasting/scripts/phase1_data_preparation/process_field_summaries.py`: missing-value handling, `apply_linear_interpolation_etof`, Step 3 ETa volume | commit 52ca0ba (2026-09-17) | Groups by `NWI_ID` instead of `HA_NAME_CODE` + `OPENET_ID` (they are 1:1 in the 2026-08-20 export). Runs once on the whole field, not per GW/SW component |
-| `nwi_agwu/etof.py` climatology fill | same file: `apply_climatology_gap_filling_etof`, `get_field_climatology`, `load_climatologies`, gap windows; `calculate_field_climatologies.py::calculate_etof_climatologies` | 52ca0ba | Climatologies built from step 01's base table. No earlier set is usable: they are NV-only (24,071 fields) and keyed by May-era OPENET_IDs that do not match the 2026-08-20 NWI_IDs. Keyed by `NWI_ID`; lookup is a merge, not a row loop. Opt-in (`etof.climatology_fill`) |
-| `nwi_agwu/fields.py` | same file: `load_field_attributes`, `merge_field_attributes` precedence, `apply_irrigation_attribute_fallbacks`, `enforce_boundary_basin_mapping`; `scripts/utils/allocation_utils.py::apply_irr_src_overrides` | 52ca0ba | The basin is still taken from the boundary `Basin` attribute. `irr_eff`/`ITYPE` still come from the export, with the boundary layer filling nulls |
-| `nwi_agwu/water_balance.py::_carryforward` | same file: `apply_winter_moisture_carryforward` | 52ca0ba | The same recurrence, compiled with numba. `tests/test_core.py` checks it against a pure-Python copy of the original |
-| `nwi_agwu/allocation.py` | `allocation_utils.py::spi_to_sw_ratio`; `process_field_summaries.py::apply_gw_sw_separation_dynamic`, `get_basin_year_spi` | 52ca0ba | Basin rules come from `config/nwi_t1_final.yaml`. The delivered code read dynamic overrides through `load_config()` with no arguments, so the 117 rule never applied. The split is applied to finished whole-field volumes (exact, see below) |
-| `nwi_agwu/spi.py` | `agricultural-water-forecasting/scripts/phase1_data_preparation/extend_basin_climate_spi_1979_2023.py::calculate_basin_spi_extended`, as re-implemented in the mixed-field review `K_prism_spi/01_compute_spi.py` | 2026-09-25 | None. Output equals the review's table exactly |
-| `nwi_agwu/otter_water_balance.py` | `otter/src/otter/water_balance.py` | local 8338226 (2026-06-08) | None (verbatim) |
-| `nwi_agwu/otter_run.py` | `Prz_Comparison/analysis/run_nv_otter_matched_continuous_monthly.py`; `nwi-t1-etdemands/prism800m/scripts/run_otter_prism.py` | 2026-09-30 / dd775fd | Precipitation is the field's own daily PRISM 800 m value. Monthly output covers every year |
-| `nwi_agwu/subsidy/models.py`, `crops.py`, `soil_texture.py` | `nwi-gw-subsidy/src/gw_subsidy/` | 7262f69 (2026-06-28) | Verbatim, except the config import and the parameter-table path |
-| `nwi_agwu/subsidy/zonal.py`, `polaris.py`, `gwfrac.py` | `nwi-gw-subsidy` `wtd_zonal.py`, `polaris_gee.py`, `subsidy.compute_field_params`, `basins.field_keep` | 7262f69 | Keyed by `NWI_ID`. Pixel area comes from the raster. POLARIS runs on project `nasa-water`. The SW filter uses the boundary source class |
+    git diff 9b60d5d -- scripts/
 
-## Why the GW/SW split can follow the water balance
+Sources and versions: [../../scripts/ORIGINAL_SOURCES.md](../../scripts/ORIGINAL_SOURCES.md).
 
-The delivered processor split mixed-field acreage into GW and SW rows first, then ran
-the water balance on each component. Doing the water balance on the whole field first and
-then scaling gives identical results:
+## Three steps made faster in process_field_summaries.py
 
-- Every volume and the storage cap are proportional to acres.
-- The carry-forward chain resets every January.
-- The SPI share is constant within a calendar year.
+Each faster version is checked against a verbatim copy of the original function
+(`tests/original_reference.py`) by `tests/test_fast_equivalence.py`.
 
-The bridge run `v0a` confirms it. It reproduces every HA × year × month cell of the
-delivered 2026-08-23 summaries to within 1e-11 acre-ft.
+| Step | Original | Faster version |
+|---|---|---|
+| Winter carry-forward | Python loop over every field-month | The same loop compiled with numba (`_carryforward_recurrence`) |
+| EToF climatology fill | Row-by-row lookup (`iterrows`) | One table join, with the same window, field, HA and month rules |
+| SW/GW split of mixed fields | Copies the rows of every basin-year | Computes the same basin-year ratios, then splits all rows with one join |
+
+## Fixes to the original behavior
+
+| Fix | Where |
+|---|---|
+| Dynamic basin rules (Fish Lake Valley 117) were read with `load_config()` and no arguments, so they never applied in NWI runs; they now come from the run config | `process_field_summaries.py` |
+| Climatologies were never built for the parquet export (the existence check looked for `etrf_` files and the builder read only CSV) | `calculate_field_climatologies.py`, `process_field_summaries.py` |
+| `ACRES_IRR` was not split for mixed fields, so both GW and SW halves carried the full value | `apply_gw_sw_separation_dynamic` |
+| HA/county summaries summed every numeric column and took `first()` of text columns | `aggregate_summaries` |
+| Carry-forward indexed rows by their position in the date-sorted frame, which is only right when the input is already sorted | `apply_winter_moisture_carryforward` |

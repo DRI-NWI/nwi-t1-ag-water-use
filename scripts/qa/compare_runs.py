@@ -7,7 +7,10 @@ the two runs must match (numbers within a relative tolerance, text exactly) afte
 both by their keys.
 
 Usage:
-    python compare_runs.py <reference_run_dir> <new_run_dir> [--rtol 1e-9]
+    python compare_runs.py <reference_run_dir> <new_run_dir> [--rtol 1e-9] [--reference-2026-10-16-names]
+
+--reference-2026-10-16-names reads the reference with the file and column names used by run
+nwi_t1_final_20261016 (before the original names were restored), mapped to the current ones.
 
 Output: a table of files and columns, with the largest difference, printed and written to
 <new_run_dir>/07_qa/compare_to_<reference run id>.csv. Exit status 1 if anything differs.
@@ -21,17 +24,30 @@ import numpy as np
 import pandas as pd
 
 # File (relative to the run directory) -> key columns used to align rows.
-FILES = {
-    "05_field_summaries/field_summaries_ALL.parquet": ["NWI_ID", "YEAR", "MONTH"],
-    "05_field_summaries/field_summaries_GW.parquet": ["NWI_ID", "YEAR", "MONTH"],
-    "05_field_summaries/field_summaries_SW.parquet": ["NWI_ID", "YEAR", "MONTH"],
-    "06_summaries/ha_summaries_ALL.csv": ["HA_NAME_CODE", "YEAR", "MONTH"],
-    "06_summaries/ha_summaries_GW.csv": ["HA_NAME_CODE", "YEAR", "MONTH"],
-    "06_summaries/ha_summaries_SW.csv": ["HA_NAME_CODE", "YEAR", "MONTH"],
-    "06_summaries/county_summaries_ALL.csv": ["COUNTY_NAME", "YEAR", "MONTH"],
-    "06_summaries/county_summaries_GW.csv": ["COUNTY_NAME", "YEAR", "MONTH"],
-    "06_summaries/county_summaries_SW.csv": ["COUNTY_NAME", "YEAR", "MONTH"],
-    "06_summaries/statewide_annual_totals.csv": ["component", "population", "YEAR"],
+FIELD_KEYS = ["NWI_ID", "YEAR", "MONTH"]
+HA_KEYS = ["HA_NAME_CODE", "YEAR", "MONTH"]
+COUNTY_KEYS = ["COUNTY_NAME", "YEAR", "MONTH"]
+FILES = {"06_summaries/statewide_annual_totals.csv": ["component", "population", "YEAR"]}
+for suffix in ["", "_GW", "_SW"]:
+    FILES[f"05_field_summaries/field_summaries_EToF_final{suffix}.parquet"] = FIELD_KEYS
+    FILES[f"06_summaries/ha_summaries_EToF_final{suffix}.csv"] = HA_KEYS
+    FILES[f"06_summaries/county_wide_summaries_EToF_final{suffix}.csv"] = COUNTY_KEYS
+
+# Run nwi_t1_final_20261016 used other names: current file -> its file, and its columns -> current.
+REFERENCE_2026_10_16_FILES = {"06_summaries/statewide_annual_totals.csv": "06_summaries/statewide_annual_totals.csv"}
+for suffix, component in [("", "ALL"), ("_GW", "GW"), ("_SW", "SW")]:
+    REFERENCE_2026_10_16_FILES[f"05_field_summaries/field_summaries_EToF_final{suffix}.parquet"] = \
+        f"05_field_summaries/field_summaries_{component}.parquet"
+    REFERENCE_2026_10_16_FILES[f"06_summaries/ha_summaries_EToF_final{suffix}.csv"] = \
+        f"06_summaries/ha_summaries_{component}.csv"
+    REFERENCE_2026_10_16_FILES[f"06_summaries/county_wide_summaries_EToF_final{suffix}.csv"] = \
+        f"06_summaries/county_summaries_{component}.csv"
+REFERENCE_2026_10_16_COLUMNS = {
+    "Peff_vol_acre_ft": "Eff_PPT_vol_acre_ft", "NetET_intermediate_acre_ft": "NetET_vol_intermediate_acre_ft",
+    "Soil_Storage_acre_ft": "Water_Surplus_Cumulative_acre_ft", "PEFF_MM": "EFF_PPT_MM",
+    "n_fields": "field_count", "n_gw_fields": "is_gw_field", "n_sw_fields": "is_sw_field",
+    "n_mixed_fields": "is_mixed_field", "pct_fields_gw_equivalent": "percent_gw_fields",
+    "pct_fields_sw_equivalent": "percent_sw_fields",
 }
 
 
@@ -90,16 +106,22 @@ def main():
     parser.add_argument("reference_run")
     parser.add_argument("new_run")
     parser.add_argument("--rtol", type=float, default=1e-9)
+    parser.add_argument("--reference-2026-10-16-names", action="store_true")
     args = parser.parse_args()
     reference_run, new_run = Path(args.reference_run), Path(args.new_run)
 
     rows = []
     for relative_path, keys in FILES.items():
-        ref_path, new_path = reference_run / relative_path, new_run / relative_path
+        reference_path = (REFERENCE_2026_10_16_FILES[relative_path] if args.reference_2026_10_16_names
+                          else relative_path)
+        ref_path, new_path = reference_run / reference_path, new_run / relative_path
         if not (ref_path.exists() and new_path.exists()):
             rows.append({"file": relative_path, "column": "<file>", "ok": False, "detail": "missing"})
             continue
-        for record in compare_file(read(ref_path), read(new_path), keys, args.rtol):
+        reference = read(ref_path)
+        if args.reference_2026_10_16_names:
+            reference = reference.rename(columns=REFERENCE_2026_10_16_COLUMNS)
+        for record in compare_file(reference, read(new_path), keys, args.rtol):
             rows.append({"file": relative_path, **record})
         print(f"compared {relative_path}", flush=True)
     report = pd.DataFrame(rows)

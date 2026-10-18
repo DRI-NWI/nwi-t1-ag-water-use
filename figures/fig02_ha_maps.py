@@ -24,7 +24,7 @@ def logn(s, lo=None):
 vols = [("acres", "Irrigated field area", "acres (annual mean)", "Greens"),
         ("ETa_final_acre_ft", "ETa", "acre-ft/yr", "YlOrRd"),
         ("PPT_vol_acre_ft", "Precipitation (PRISM)", "acre-ft/yr", "Blues"),
-        ("Peff_vol_acre_ft", "Effective precipitation (OTTER)", "acre-ft/yr", "PuBu"),
+        ("Eff_PPT_vol_acre_ft", "Effective precipitation (OTTER)", "acre-ft/yr", "PuBu"),
         ("GW_subsidy_acre_ft", "Groundwater-ET subsidy", "acre-ft/yr", "BuGn"),
         ("Carryforward_Used_acre_ft", "Winter carry-forward used", "acre-ft/yr", "GnBu"),
         ("NetET_final_acre_ft", "Net ET", "acre-ft/yr", "YlOrBr"),
@@ -39,7 +39,7 @@ K.savefig(fig, "fig02_ha_volumes")
 
 # ---- Fig. 3 depths --------------------------------------------------------------------------
 deps = [("ETa_final_ft", "ETa", "YlOrRd", (0, 4)), ("PPT_vol_ft", "Precipitation", "Blues", (0, 2)),
-        ("Peff_vol_ft", "Effective precipitation", "PuBu", (0, 2)), ("GW_subsidy_ft", "GW-ET subsidy", "BuGn", (0, 0.5)),
+        ("Eff_PPT_vol_ft", "Effective precipitation", "PuBu", (0, 2)), ("GW_subsidy_ft", "GW-ET subsidy", "BuGn", (0, 0.5)),
         ("Carryforward_Used_ft", "Carry-forward used", "GnBu", (0, 0.3)), ("NetET_final_ft", "Net ET", "YlOrBr", (0, 3.5)),
         ("AR_final_ft", "Applied water", "OrRd", (0, 6))]
 fig, axs = plt.subplots(2, 4, figsize=(16, 11.5))

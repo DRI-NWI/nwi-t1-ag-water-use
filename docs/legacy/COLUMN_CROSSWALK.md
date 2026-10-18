@@ -8,107 +8,88 @@ packages are:
 
 Current columns are defined in [../DATA_DICTIONARY.md](../DATA_DICTIONARY.md).
 
-Status:
+File and column names are the original ones. No column is renamed. Status:
 
 - **kept**: same name and meaning.
-- **renamed**: same quantity, new name.
-- **replaced**: a different, documented quantity takes its place.
+- **new source**: same name; the value comes from a different input.
+- **fixed**: same name; the earlier value was wrong at that level.
+- **added**: new column.
 - **dropped**: not written. The reason is given.
 
-## Field files (`field_summaries_{GW,SW}` → `field_summaries_{ALL,GW,SW}`)
+## File names
 
-Earlier: 60 columns. Current: 55 columns. ALL (the whole field) is new.
+| Earlier | Current |
+|---|---|
+| `field_summaries_EToF_final_{GW,SW}.csv` | same; plus `field_summaries_EToF_final.csv` (whole field) and a `.parquet` copy of each |
+| `ha_summaries_EToF_final_{GW,SW}.csv` | same (all fields in the HA, including out-of-state fields); plus `ha_summaries_EToF_final.csv` (whole field) and `..._NV_fields_only.csv` versions of each (Nevada fields only) |
+| `counties/county_wide_summaries_EToF_final_{GW,SW}.csv` | `county_wide_summaries_EToF_final{,_GW,_SW}.csv` in `06_summaries/` |
 
-| Earlier column | Status | Current column / reason |
+## Field files
+
+| Earlier column | Status | Current |
 |---|---|---|
-| `NWI_ID`, `NWI_PARENT`, `STATE`, `HYD_AREA`, `HYD_AREA_N`, `HA_NAME_CODE`, `GRIDMET_ID` | kept | |
-| `irr_eff`, `ITYPE`, `IRR_SRC`, `IRR_SRC_ASSUMED` | kept | |
-| `YEAR`, `MONTH`, `DATE` | kept | |
-| `water_source`, `allocation_method`, `allocation_ratio`, `spi_value` | kept | |
-| `ACRES_FTR_GEOM`, `ACRES_IRR`, `%_IRRIGATED` | kept | |
-| `ETO_MM`, `EToF`, `EToF_interpolated`, `interpolation_method`, `ETA_MM_post_interp` | kept | |
-| `PPT_MM` | kept, new source | PRISM 800 m. Earlier: the export precipitation, recomputed as `EFF_PPT_MM` / 0.85 |
-| `AWC`, `PAW_ft`, `Soil_Moisture_Cap_acre_ft`, `Soil_Moisture_Overflow_acre_ft` | kept | |
-| `ETa_final_acre_ft`, `NetET_final_acre_ft`, `AR_final_acre_ft`, `PPT_vol_acre_ft` | kept | Net ET and applied water now include OTTER Peff and the GW subsidy |
+| `NWI_ID`, `NWI_PARENT`, `STATE`, `HYD_AREA`, `HYD_AREA_N`, `HA_NAME_CODE`, `GRIDMET_ID`, `irr_eff`, `ITYPE`, `IRR_SRC`, `IRR_SRC_ASSUMED` | kept | |
+| `YEAR`, `MONTH`, `DATE`, `water_source`, `allocation_method`, `allocation_ratio`, `spi_value` | kept | |
+| `ACRES_FTR_GEOM`, `%_IRRIGATED`, `ETO_MM`, `ETA_MM`, `EToF`, `EToF_interpolated`, `interpolation_method`, `ETA_MM_post_interp` | kept | |
+| `AWC`, `PAW_ft`, `Soil_Moisture_Cap_acre_ft`, `Soil_Moisture_Overflow_acre_ft`, `Water_Surplus_Cumulative_acre_ft` | kept | |
+| `ETa_final_acre_ft`, `Eff_PPT_vol_acre_ft`, `NetET_vol_intermediate_acre_ft`, `NetET_final_acre_ft`, `AR_final_acre_ft`, `PPT_vol_acre_ft` | kept | Net ET and applied water include OTTER effective precipitation and the GW subsidy. `NetET_vol_intermediate_acre_ft` is the net ET entering carry-forward, now after the subsidy |
 | `ETa_final_ft`, `NetET_final_ft`, `AR_final_ft`, `PPT_final_ft` | kept | |
-| `ETA_MM` | replaced | `ETA_MM_EXPORT` (the value as exported). Earlier `ETA_MM` was overwritten by the gap-filled value, which is `ETA_MM_post_interp` |
-| `EFF_PPT_MM` | replaced | `PEFF_MM`, OTTER effective precipitation. Earlier: 0.85 × PPT |
-| `Eff_PPT_vol_acre_ft` | renamed | `Peff_vol_acre_ft` |
-| `NetET_vol_intermediate_acre_ft` | renamed | `NetET_intermediate_acre_ft`, net ET entering carry-forward, after the GW subsidy. Before the subsidy: `NetET_pre_subsidy_acre_ft` |
-| `Water_Surplus_Cumulative_acre_ft` | renamed | `Soil_Storage_acre_ft`, stored soil water at month end |
-| `Eff_PPT_Adjusted_acre_ft` | replaced | It was ETa − final net ET, which mixes Peff, carry-forward and subsidy. The terms are now separate: `Peff_vol_acre_ft`, `Carryforward_Used_acre_ft`, `GW_subsidy_acre_ft` |
+| `PPT_MM` | new source | PRISM 800 m. Earlier: the export precipitation, recomputed as `EFF_PPT_MM` / 0.85 |
+| `EFF_PPT_MM` | new source | OTTER effective precipitation. Earlier: 0.85 × PPT |
+| `ACRES_IRR` | fixed | In the GW and SW files a mixed field's irrigated acres are split by its share, like `ACRES_FTR_GEOM`. Earlier both halves carried the full value |
 | `ETa_vol_intermediate_acre_ft` | dropped | identical to `ETa_final_acre_ft` |
 | `ETNET_MM`, `AR_MM`, `AR_vol_original_acre_ft` | dropped | the OpenET export's own net ET and applied water, built on 0.85 × PPT; superseded by `NetET_final` and `AR_final` |
+| `Eff_PPT_Adjusted_acre_ft` | dropped | ETa − final net ET, which mixes effective precipitation, carry-forward and subsidy; the separate terms are `Eff_PPT_vol_acre_ft`, `Carryforward_Used_acre_ft` and `GW_subsidy_acre_ft` |
 | `OPENET_ID` | dropped | identical to `NWI_ID` for every 2026-08-20 field |
 | `Basin` | dropped | the same information as `HYD_AREA` + `HYD_AREA_N` |
 | `HYD_AREA_new`, `HYD_AREA_N_new` | dropped | packaging copies of `HYD_AREA` / `HYD_AREA_N` |
 | `Acres` | dropped | boundary-layer acres; every volume uses `ACRES_FTR_GEOM` |
-| `ACRES_ALL` | dropped | the export's total-area column, not used in any calculation; available in the OpenET export |
+| `ACRES_ALL` | dropped | the export's total-area column, not used in any calculation |
 | `irr_eff_ASSUMED`, `IRR_ATTR_ASSUMED`, `IRR_ATTR_ASSUMPTION` | dropped | `irr_eff` is complete in the export, so it is never assumed; the source assumption is `IRR_SRC_ASSUMED` |
-| `spi_timescale` | dropped | always 12 (`spi.timescale_months` in the config) |
+| `spi_timescale` | dropped | always 12 |
 | `date` | dropped | duplicate of `DATE` |
 
-New field columns:
+Added field columns:
 
 | Column | Content |
 |---|---|
-| `COUNTY_NAME` | Nevada county of the field |
-| `IRR_SRC_ORIGINAL` | source in the boundary layer, before basin rules |
-| `IRR_SRC_OVERRIDE` | basin rule applied (Diamond Valley mixed → GW) |
-| `CROP_major` | dominant CDL crop, used for the subsidy rooting depth |
+| `COUNTY_NAME` | Nevada county |
+| `IRR_SRC_ORIGINAL`, `IRR_SRC_OVERRIDE` | source before basin rules, and the rule applied |
+| `CROP_major` | dominant CDL crop (subsidy rooting depth) |
 | `spi_source` | PRISM contributing area or HA |
-| `peff_method` | `otter`, or the 0.85 × PPT fallback |
+| `ETA_MM_EXPORT` | ETa as exported, before gap filling |
+| `peff_method` | `otter` or the 0.85 × PPT fallback |
 | `gw_frac` | groundwater-ET fraction f |
 | `NetET_pre_subsidy_acre_ft`, `GW_subsidy_potential_acre_ft`, `GW_subsidy_acre_ft`, `Carryforward_Used_acre_ft` | water-balance terms |
 
-## HA summaries (`ha_summaries_EToF_final_{GW,SW}` → `ha_summaries_{ALL,GW,SW}`)
+## HA and county summaries
 
-Earlier: 67 columns. Current: 64 columns. Rows are now irrigated field-years
-(`%_IRRIGATED` > 0.5); earlier rows were all field-months.
+Rows are irrigated field-years (`%_IRRIGATED` > 0.5); earlier rows were all field-months.
+County summaries cover Nevada fields, as before.
 
-| Earlier column | Status | Current column / reason |
+| Earlier column | Status | Current |
 |---|---|---|
-| `HA_NAME_CODE`, `HYD_AREA`, `HYD_AREA_N`, `YEAR`, `MONTH` | kept | keys |
-| `ACRES_FTR_GEOM`, `ACRES_IRR`, `ETa_final_acre_ft`, `NetET_final_acre_ft`, `AR_final_acre_ft`, `PPT_vol_acre_ft` | kept | sums |
-| `Soil_Moisture_Cap_acre_ft`, `Soil_Moisture_Overflow_acre_ft` | kept | sums |
+| keys (`HA_NAME_CODE`, `HYD_AREA`, `HYD_AREA_N` / `COUNTY_NAME`, `YEAR`, `MONTH`) | kept | |
+| `ACRES_FTR_GEOM`, `ETa_final_acre_ft`, `Eff_PPT_vol_acre_ft`, `NetET_vol_intermediate_acre_ft`, `NetET_final_acre_ft`, `AR_final_acre_ft`, `PPT_vol_acre_ft`, `Soil_Moisture_Cap_acre_ft`, `Soil_Moisture_Overflow_acre_ft`, `Water_Surplus_Cumulative_acre_ft` | kept | sums |
 | `ETa_final_ft`, `NetET_final_ft`, `AR_final_ft`, `PPT_final_ft` | kept | summed volume ÷ summed acres |
-| `ETO_MM`, `PPT_MM` | kept, fixed | now acre-weighted means (earlier: unweighted) |
-| `EFF_PPT_MM` | replaced | `PEFF_MM`, acre-weighted OTTER Peff |
-| `Eff_PPT_vol_acre_ft`, `NetET_vol_intermediate_acre_ft`, `Water_Surplus_Cumulative_acre_ft` | renamed | `Peff_vol_acre_ft`, `NetET_intermediate_acre_ft`, `Soil_Storage_acre_ft` |
-| `field_count`, `num_fields_irrigated` | renamed | `n_fields` |
-| `is_gw_field`, `is_sw_field`, `is_mixed_field` | renamed | `n_gw_fields`, `n_sw_fields`, `n_mixed_fields` |
-| `percent_gw_fields`, `percent_sw_fields` | renamed | `pct_fields_gw_equivalent`, `pct_fields_sw_equivalent` |
-| `spi_value` | replaced | `spi_sept12`, the basin-year SPI. Earlier: a sum over fields |
-| `allocation_ratio` | replaced | `mixed_sw_ratio`, the basin-year mixed SW share. Earlier: a sum over fields |
-| `allocation_method` | kept | basin-year rule |
+| `field_count`, `num_fields_irrigated`, `is_gw_field`, `is_sw_field`, `is_mixed_field`, `percent_gw_fields`, `percent_sw_fields` | kept | counts and percentages |
+| `ACRES_IRR` | fixed | GW/SW files: split by share (see field files) |
+| `ETO_MM`, `PPT_MM`, `EFF_PPT_MM` | fixed | acre-weighted means; earlier unweighted means |
+| `allocation_method` | kept, HA only | the basin-year rule |
+| `spi_value`, `allocation_ratio` | dropped | earlier a sum over fields (e.g. `spi_value` = −15.3); the basin-year values are the added `spi_sept12` and `mixed_sw_ratio` (HA only) |
 | `NWI_ID`, `OPENET_ID`, `NWI_PARENT`, `GRIDMET_ID`, `Basin`, `DATE`, `date`, `STATE`, `HYD_AREA_new`, `HYD_AREA_N_new` | dropped | one arbitrary field's value (`first()`) |
-| `irr_eff`, `ITYPE`, `IRR_SRC`, `Acres`, `AWC`, `PAW_ft`, `ACRES_ALL` | dropped | sums of per-field attributes (e.g. `irr_eff` = 39.25). Use `irr_eff_effective` and the counts |
+| `irr_eff`, `ITYPE`, `IRR_SRC`, `Acres`, `AWC`, `PAW_ft`, `ACRES_ALL` | dropped | sums of per-field attributes (e.g. `irr_eff` = 39.25) |
 | `EToF`, `EToF_interpolated`, `%_IRRIGATED`, `spi_timescale` | dropped | sums of per-field ratios |
 | `ETA_MM`, `ETNET_MM`, `AR_MM`, `ETA_MM_post_interp` | dropped | sums of per-field depths; use the `_ft` depths |
 | `ETa_vol_intermediate_acre_ft`, `AR_vol_original_acre_ft`, `Eff_PPT_Adjusted_acre_ft` | dropped | as in the field files |
-| `IRR_SRC_ASSUMED`, `irr_eff_ASSUMED`, `IRR_ATTR_ASSUMED`, `IRR_ATTR_ASSUMPTION`, `interpolation_method`, `water_source` | dropped | one field's flag or label; replaced by counts (`n_fields_irr_src_assumed`, `n_fields_eta_*`) |
+| `IRR_SRC_ASSUMED`, `irr_eff_ASSUMED`, `IRR_ATTR_ASSUMED`, `IRR_ATTR_ASSUMPTION`, `interpolation_method`, `water_source` | dropped | one field's flag or label; replaced by the added counts |
+| `total_all_fields`, `gw_field_equivalent`, `sw_field_equivalent` (county only) | dropped | intermediate columns; `field_count` and `percent_*_fields` carry the result |
 
-New HA columns:
+Added summary columns:
 
 | Column | Content |
 |---|---|
-| `GW_subsidy_ft` | GW subsidy depth |
-| `irr_eff_effective` | net ET ÷ applied water |
-| `pct_acres_missing_eta` | share of acres with no ETa that month |
-| `n_fields_irr_src_assumed`, `n_fields_eta_interpolated`, `n_fields_eta_climatology`, `n_fields_eta_missing`, `n_fields_peff_fallback`, `n_fields_gw_subsidy` | field counts by data flag |
-| `spi_source` | PRISM contributing area or HA |
-| `<col>_NV`, `<col>_outside_NV` | Nevada and out-of-state parts of acres, ETa, PPT, Peff, GW subsidy, carry-forward, net ET, applied water and field count |
 | `NetET_pre_subsidy_acre_ft`, `GW_subsidy_potential_acre_ft`, `GW_subsidy_acre_ft`, `Carryforward_Used_acre_ft` | water-balance terms |
-
-## County summaries (`county_wide_summaries_EToF_final_{GW,SW}` → `county_summaries_{ALL,GW,SW}`)
-
-Earlier: 67 columns. Current: 40 columns. Nevada fields only, as before; rows are now
-irrigated field-years.
-
-- **Same rules as the HA summaries.** Every earlier column is treated as in the HA table
-  above.
-- **No basin-year columns.** `allocation_method`, `spi_value` and `allocation_ratio` are
-  dropped, because a county spans several basins.
-- **No HA keys.** `HYD_AREA` and `HYD_AREA_N` are not county columns.
-- **No state split.** The `_NV` / `_outside_NV` columns are not needed: a county holds only
-  Nevada fields.
+| `GW_subsidy_ft`, `irr_eff_effective`, `pct_acres_missing_eta` | subsidy depth, net ET ÷ applied water, share of acres with no ETa |
+| `n_fields_irr_src_assumed`, `n_fields_eta_interpolated`, `n_fields_eta_climatology`, `n_fields_eta_missing`, `n_fields_peff_fallback`, `n_fields_gw_subsidy` | field counts by data flag |
+| `mixed_sw_ratio`, `spi_sept12`, `spi_source` (HA only) | basin-year allocation of mixed fields |

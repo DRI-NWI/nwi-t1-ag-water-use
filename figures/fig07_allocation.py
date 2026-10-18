@@ -9,8 +9,11 @@ from matplotlib import colors as mcolors
 
 import _mapkit as K
 
-al = pd.read_csv(K.P.summaries / "allocation_basin_year.csv", dtype={"HA_CODE": str})
-attrs = pd.read_parquet(K.P.field_attrs)
+al = pd.read_csv(K.P.summaries / "dynamic_allocation_stats.csv").rename(columns={"year": "YEAR"})
+al["HA_CODE"] = al["basin_code"].str.extract(r"\(([^)]+)\)\s*$")[0].str.lstrip("0")
+spi_table = pd.read_csv(K.P.spi_table, dtype={"HA": str})
+al["spi_source"] = al["HA_CODE"].map(dict(zip(spi_table["HA"].str.lstrip("0"), spi_table["spi_source"])))
+attrs = K.field_attributes()
 mixed_ac = attrs[attrs.IRR_SRC.eq(3)].groupby("HA_CODE")["Acres"].sum()
 names = attrs.drop_duplicates("HA_CODE").set_index("HA_CODE")["HA_NAME_CODE"]
 order = mixed_ac.sort_values(ascending=False).index

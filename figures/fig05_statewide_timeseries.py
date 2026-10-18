@@ -21,7 +21,7 @@ k = 1e3
 fig, axs = plt.subplots(3, 2, figsize=(14, 12))
 ax = axs[0, 0]
 for c, lab, col in [("ETa_final_acre_ft", "ETa", "#b2182b"), ("PPT_vol_acre_ft", "Precipitation (PRISM)", "#4393c3"),
-                    ("Peff_vol_acre_ft", "Effective precipitation (OTTER)", "#2166ac"),
+                    ("Eff_PPT_vol_acre_ft", "Effective precipitation (OTTER)", "#2166ac"),
                     ("NetET_final_acre_ft", "Net ET", "#e08214"), ("AR_final_acre_ft", "Applied water", "#542788")]:
     ax.plot(A.index, A[c] / k, label=lab, color=col, lw=1.8)
 ax.set_ylabel("thousand acre-ft/yr"); ax.set_title("Water balance, irrigated field-years"); ax.legend(fontsize=8, ncol=2)
@@ -61,15 +61,15 @@ fig.tight_layout()
 K.savefig(fig, "fig05_statewide_annual")
 
 # ---- monthly cycle -------------------------------------------------------------------------
-h = pd.read_csv(K.P.summaries / "ha_summaries_ALL.csv")
-cols = ["ETa_final_acre_ft", "Peff_vol_acre_ft", "PPT_vol_acre_ft", "GW_subsidy_acre_ft", "NetET_pre_subsidy_acre_ft",
-        "NetET_intermediate_acre_ft", "Carryforward_Used_acre_ft", "Soil_Storage_acre_ft", "NetET_final_acre_ft",
+h = pd.read_csv(K.P.summaries / "ha_summaries_EToF_final.csv")
+cols = ["ETa_final_acre_ft", "Eff_PPT_vol_acre_ft", "PPT_vol_acre_ft", "GW_subsidy_acre_ft", "NetET_pre_subsidy_acre_ft",
+        "NetET_vol_intermediate_acre_ft", "Carryforward_Used_acre_ft", "Water_Surplus_Cumulative_acre_ft", "NetET_final_acre_ft",
         "Soil_Moisture_Overflow_acre_ft"]
 m = h.groupby(["YEAR", "MONTH"])[cols].sum().groupby("MONTH").mean() / k
 fig, axs = plt.subplots(1, 2, figsize=(14, 4.8))
 ax = axs[0]
 for c, lab, col, ls in [("ETa_final_acre_ft", "ETa", "#b2182b", "-"), ("PPT_vol_acre_ft", "Precipitation", "#4393c3", "-"),
-                        ("Peff_vol_acre_ft", "Effective precipitation", "#2166ac", "--"),
+                        ("Eff_PPT_vol_acre_ft", "Effective precipitation", "#2166ac", "--"),
                         ("NetET_pre_subsidy_acre_ft", "ETa − Peff", "#999999", "-"),
                         ("NetET_final_acre_ft", "Net ET (final)", "#e08214", "-")]:
     ax.plot(m.index, m[c], ls, color=col, lw=2, label=lab, marker="o", ms=3)
@@ -78,7 +78,7 @@ ax.set_title("Mean monthly water balance, irrigated field-years"); ax.legend(fon
 ax = axs[1]
 ax.bar(m.index - 0.2, m["GW_subsidy_acre_ft"], 0.4, color="#1b7837", label="GW-ET subsidy")
 ax.bar(m.index + 0.2, m["Carryforward_Used_acre_ft"], 0.4, color="#80cdc1", label="Carry-forward used")
-ax.plot(m.index, m["Soil_Storage_acre_ft"], "k-o", ms=3, lw=1.2, label="Soil storage at month end")
+ax.plot(m.index, m["Water_Surplus_Cumulative_acre_ft"], "k-o", ms=3, lw=1.2, label="Soil storage at month end")
 ax.plot(m.index, m["Soil_Moisture_Overflow_acre_ft"], "-s", color="#8c510a", ms=3, lw=1, label="Storage overflow")
 ax.set_xticks(range(1, 13)); ax.set_ylabel("thousand acre-ft/month"); ax.legend(fontsize=8)
 ax.set_title("Subsidy, carry-forward and soil storage by month")

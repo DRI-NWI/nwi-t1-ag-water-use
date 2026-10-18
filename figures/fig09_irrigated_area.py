@@ -26,10 +26,9 @@ oof["xgbrf_oof"] = oof.Acres * (oof.p_irr_model > 0.5)
 pool = pd.read_parquet(POOL).rename(columns={"year": "YEAR"}).merge(may, on="OPENET_ID", how="inner")
 pool["xgbrf_pooled17"] = pool.Acres * (pool.xgb_status == 1)
 
-base = pd.read_parquet(K.P.field_base, columns=["NWI_ID", "STATE", "YEAR", "MONTH", "ACRES_FTR_GEOM", "%_IRRIGATED"])
+base = pd.read_parquet(K.P.fields / "field_summaries_EToF_final.parquet",
+                       columns=["NWI_ID", "STATE", "HYD_AREA", "YEAR", "MONTH", "ACRES_FTR_GEOM", "%_IRRIGATED"])
 base = base[base.STATE.eq("NV") & base.MONTH.eq(7)]
-attrs = pd.read_parquet(K.P.field_attrs, columns=["NWI_ID", "HYD_AREA"])
-base = base.merge(attrs, on="NWI_ID")
 base["irrmapper_aug"] = base.ACRES_FTR_GEOM * (base["%_IRRIGATED"] > 0.5)
 base["irrmapper_frac_aug"] = base.ACRES_FTR_GEOM * base["%_IRRIGATED"]
 

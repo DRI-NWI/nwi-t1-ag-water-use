@@ -47,9 +47,8 @@ The full method is in [docs/METHODS.md](docs/METHODS.md).
 | Irrigated area (acres) | 540,966 | 304,192 | 236,773 |
 
 These totals include the out-of-state fields of HAs that cross the state line. Nevada
-fields alone have net ET 936,122 and applied water 1,366,930 acre-ft/yr. The out-of-state
-fields have net ET 129,526 and applied water 200,228, all GW. The HA summaries report
-both parts (`_NV`, `_outside_NV` columns).
+fields alone have net ET 936,122 and applied water 1,366,930 acre-ft/yr. Each HA summary is
+written for all fields and for Nevada fields only (`_NV_fields_only`).
 
 Maps, time series and checks for every variable are on these pages:
 - [docs/RESULTS.md](docs/RESULTS.md): the water balance, allocation, inputs, and irrigated area (IrrMapper vs XGBRF).
@@ -62,10 +61,11 @@ defined in [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md). Changes from the 
 
 | Path | Content |
 |---|---|
-| `05_field_summaries/field_summaries_{ALL,GW,SW}.{csv,parquet}` | Field × month, every field and month. ALL is the whole field; GW and SW split mixed fields by their yearly share (GW + SW = ALL) |
-| `06_summaries/ha_summaries_{ALL,GW,SW}.csv` | HA × year × month, irrigated field-years |
-| `06_summaries/county_summaries_{ALL,GW,SW}.csv` | Nevada county × year × month, irrigated field-years |
-| `06_summaries/allocation_basin_year.csv` | Mixed-field SW share and SPI per HA and year |
+| `05_field_summaries/field_summaries_EToF_final{,_GW,_SW}.{csv,parquet}` | Field × month, every field and month. No suffix = whole field; `_GW` and `_SW` split mixed fields by their yearly share (GW + SW = whole field) |
+| `06_summaries/ha_summaries_EToF_final{,_GW,_SW}.csv` | HA × year × month, irrigated field-years, every field in the HA (including out-of-state fields) |
+| `06_summaries/ha_summaries_EToF_final{,_GW,_SW}_NV_fields_only.csv` | the same, Nevada fields only |
+| `06_summaries/county_wide_summaries_EToF_final{,_GW,_SW}.csv` | Nevada county × year × month, irrigated field-years |
+| `06_summaries/dynamic_allocation_stats.csv` | Mixed-field SW share and SPI per HA and year |
 | `06_summaries/statewide_annual_totals.csv` | Statewide annual volumes for irrigated field-years and for all field-months |
 
 ## Running
@@ -76,17 +76,24 @@ cd scripts && PY=python PY_EXACT=python ./run_all.sh
 cd ../figures && ./run_figures.sh
 ```
 
+The scripts are the original agricultural-water-forecasting, OTTER and nwi-gw-subsidy
+scripts, copied and edited for this workflow. Each edit is marked `# NWI T1`; sources and
+versions are in [scripts/ORIGINAL_SOURCES.md](scripts/ORIGINAL_SOURCES.md).
+
 | Step | Script | Writes |
 |---|---|---|
-| 01 | `01_build_inputs.py` | Field attributes, PRISM monthly precipitation and ETo, field-month EToF/ETa |
-| 01b | `01b_etof_climatology.py` | Per-field EToF climatologies |
-| 02 | `02_run_otter.py` | Monthly OTTER effective precipitation per field |
-| 03 | `03_compute_spi.py` | PRISM SPI per HA / contributing area; Sept SPI-12 per HA and year |
-| 04a–c | `04a_dtw_zonal.py`, `04b_texture_polaris.py`, `04c_gw_fraction.py` | Depth to water per field, POLARIS texture, groundwater fraction f |
-| 05 | `05_process_fields.py` | Field water balance, carry-forward, SW/GW split, field files, HA and county summaries |
-| 07 | `07_bridge_qa.py` | QA tables |
+| 1 | `phase1_data_preparation/aggregate_field_prism_monthly.py` | Monthly PRISM precipitation and ETo per field |
+| 1 | `phase1_data_preparation/calculate_field_climatologies.py` | Per-field EToF climatologies |
+| 1 | `phase1_data_preparation/calculate_basin_spi.py` | PRISM SPI per HA / contributing area |
+| 2 | `otter/run_nv_otter_prism_monthly.py` | Monthly OTTER effective precipitation per field |
+| 3 | `gw_subsidy/main.py all` | Depth to water per field, POLARIS texture, groundwater fraction f |
+| 4 | `phase1_data_preparation/process_field_summaries.py` | Field water balance, carry-forward, SW/GW split, field files, HA and county summaries |
+| 5 | `qa/bridge_qa.py`, `qa/compare_runs.py` | Reproduction check, bridge table, run-to-run comparison |
 
-Step 04a needs `exactextract`. Step 04b uses Earth Engine (project `nasa-water`).
+Step 3 needs `exactextract`; POLARIS texture uses Earth Engine (project `nasa-water`) for
+fields not already in the texture cache. `tests/test_fast_equivalence.py` checks the three
+faster processor steps (carry-forward, climatology fill, SW/GW split) against the original code.
+
 
 ---
 
