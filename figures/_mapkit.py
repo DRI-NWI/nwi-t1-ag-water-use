@@ -18,11 +18,12 @@ import numpy as np
 import pandas as pd
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO / "src"))
-from nwi_agwu import config as C  # noqa: E402
+sys.path.insert(0, str(REPO / "scripts" / "utils"))
+sys.path.insert(0, str(REPO / "scripts"))
+from nwi_config import load_config, RunPaths  # noqa: E402
 
-CFG = C.load()
-P = C.RunPaths(CFG)
+CFG = load_config()
+P = RunPaths(CFG)
 IMG = REPO / "docs" / "images"
 IMG.mkdir(parents=True, exist_ok=True)
 CACHE = P.root / "figures_cache"
@@ -90,10 +91,32 @@ def rivers() -> gpd.GeoDataFrame:
     return _cached("rivers", build)
 
 
+def field_attributes() -> pd.DataFrame:
+    """
+    One row per field from the ALL field file: source, state, HA and area.
+
+    Returns
+    -------
+    pd.DataFrame
+        NWI_ID, STATE, HYD_AREA, HA_NAME_CODE, HA_CODE (code without leading zeros),
+        IRR_SRC, IRR_SRC_ORIGINAL, IRR_SRC_ASSUMED, Acres (field area).
+    """
+    def build():
+        cols = ["NWI_ID", "STATE", "HYD_AREA", "HA_NAME_CODE", "IRR_SRC", "IRR_SRC_ORIGINAL", "IRR_SRC_ASSUMED",
+                "ACRES_FTR_GEOM", "YEAR", "MONTH"]
+        f = pd.read_parquet(P.fields / "field_summaries_EToF_final.parquet", columns=cols)
+        f = f[(f.YEAR == f.YEAR.min()) & (f.MONTH == 1)].drop(columns=["YEAR", "MONTH"])
+        f = f.rename(columns={"ACRES_FTR_GEOM": "Acres"})
+        f["HA_CODE"] = f["HYD_AREA"].astype(str).str.lstrip("0").replace("", "0")
+        return f.reset_index(drop=True)
+    return _cached("field_attributes", build)
+
+
 def fields() -> gpd.GeoDataFrame:
+    """Field polygons in the map projection, with field_attributes() and a water-right label."""
     def build():
         g = gpd.read_file(CFG["inputs"]["fields_gpkg"], columns=["NWI_ID"]).to_crs(CRS)
-        a = pd.read_parquet(P.field_attrs)
+        a = field_attributes()
         g = g.merge(a, on="NWI_ID", how="left")
         g["source_label"] = np.select(
             [g["IRR_SRC_ASSUMED"].astype(bool), g["IRR_SRC_ORIGINAL"].eq(2), g["IRR_SRC_ORIGINAL"].eq(1),
@@ -152,13 +175,14 @@ def scalebar(ax, km=100, loc=(0.62, 0.04)):
 def ha_annual(comp="ALL") -> pd.DataFrame:
     """HA x year: volumes summed over months, acres averaged over months (irrigated field-years)."""
     def build():
-        h = pd.read_csv(P.summaries / f"ha_summaries_{comp}.csv", dtype={"HYD_AREA": str})
-        vol = [c for c in h.columns if c.endswith("_acre_ft") and c not in ("Soil_Moisture_Cap_acre_ft", "Soil_Storage_acre_ft")]
+        suffix = "" if comp == "ALL" else f"_{comp}"
+        h = pd.read_csv(P.summaries / f"ha_summaries_EToF_final{suffix}.csv", dtype={"HYD_AREA": str})
+        vol = [c for c in h.columns if c.endswith("_acre_ft") and c not in ("Soil_Moisture_Cap_acre_ft", "Water_Surplus_Cumulative_acre_ft")]
         g = h.groupby(["HYD_AREA", "YEAR"])
         out = g[vol].sum()
         out["acres"] = g["ACRES_FTR_GEOM"].mean()
         out["acres_irr"] = g["ACRES_IRR"].mean()
-        out["n_fields"] = g["n_fields"].max()
+        out["n_fields"] = g["field_count"].max()
         for c in ["mixed_sw_ratio", "spi_sept12"]:
             if c in h.columns:
                 out[c] = g[c].first()
@@ -173,7 +197,7 @@ def ha_mean(comp="ALL", years=None) -> pd.DataFrame:
     a = a[a.YEAR.isin(yrs)]
     num = [c for c in a.columns if c.endswith("_acre_ft") or c in ("acres", "acres_irr")]
     m = a.groupby("HYD_AREA")[num].sum() / len(yrs)
-    for v in ["ETa_final", "PPT_vol", "Peff_vol", "NetET_final", "AR_final", "GW_subsidy", "NetET_pre_subsidy",
+    for v in ["ETa_final", "PPT_vol", "Eff_PPT_vol", "NetET_final", "AR_final", "GW_subsidy", "NetET_pre_subsidy",
               "Carryforward_Used"]:
         m[f"{v}_ft"] = m[f"{v}_acre_ft"] / m["acres"].replace(0, np.nan)
     return m.reset_index()

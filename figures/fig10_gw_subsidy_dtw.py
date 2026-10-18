@@ -14,26 +14,27 @@ from matplotlib import colors as mcolors
 from matplotlib.lines import Line2D
 
 import _mapkit as K
-from nwi_agwu.subsidy import gwfrac, models, soil_texture
+from gw_subsidy import models, soil_texture
 
 CFG, P = K.CFG, K.P
 NY = CFG["run"]["end_year"] - CFG["run"]["start_year"] + 1
-MA = P.subsidy / "ma_comparison"
-attrs = pd.read_parquet(P.field_attrs)
-new = pd.read_parquet(P.field_gwfrac)
-f_ma_path = MA / "field_gwfrac_ma.parquet"
-if not f_ma_path.exists():
-    base = pd.read_parquet(P.field_base, columns=["NWI_ID", "MONTH", "ETO_MM"])
-    from nwi_agwu import fields as F
-    a2 = F.apply_static_overrides(attrs, CFG["allocation"]["static_overrides"])
-    ma = gwfrac.compute(a2, pd.read_parquet(MA / "field_wtd_ma.parquet"), pd.read_parquet(MA / "field_wtd_pixels_ma.parquet"),
-                        pd.read_csv(P.field_texture), gwfrac.growing_season_eto(base, CFG["gw_subsidy"]["growing_season_months"]), CFG)
-    ma.to_parquet(f_ma_path, index=False)
-ma = pd.read_parquet(f_ma_path)
+MA = P.subsidy / "ma_comparison"      # written by prep_ma_dtw_zonal.py
+attrs = K.field_attributes()
+
+
+def load_params(path):
+    """Per-field parameters from gw_subsidy (OPENET_ID = NWI_ID), with a DTW-coverage flag."""
+    params = pd.read_parquet(path).rename(columns={"OPENET_ID": "NWI_ID"})
+    params["dtw_available"] = params["wtd_mean_m"].notna()
+    return params
+
+
+new = load_params(P.field_gwfrac)
+ma = load_params(MA / "field_params.parquet")
 
 fy_path = MA / "field_subsidy_new_vs_ma.parquet"
 if not fy_path.exists():
-    d = pd.read_parquet(P.fields / "field_summaries_ALL.parquet",
+    d = pd.read_parquet(P.fields / "field_summaries_EToF_final.parquet",
                         columns=["NWI_ID", "YEAR", "HYD_AREA", "STATE", "%_IRRIGATED", "ETa_final_acre_ft",
                                  "NetET_pre_subsidy_acre_ft", "GW_subsidy_acre_ft", "ACRES_FTR_GEOM"])
     d = d[d["%_IRRIGATED"] > 0.5]

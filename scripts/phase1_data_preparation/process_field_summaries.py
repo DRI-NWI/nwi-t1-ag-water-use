@@ -29,9 +29,11 @@ NWI T1 edits to the agricultural-water-forecasting version (commit 58819af):
     parquet export does not have.
   * Counties come from the county assignment table (merge_county_assignment).
   * GW and SW components and the whole field (ALL) are processed in one run.
-  * Field files keep a documented set of columns (FIELD_OUTPUT_COLUMNS). HA and county
-    summaries are built by aggregate_summaries, from irrigated field-years when
-    summaries.irrigated_only is set, with Nevada and out-of-state parts in the HA files.
+  * Field files keep a documented set of columns (FIELD_OUTPUT_COLUMNS) under the original
+    column and file names. HA and county summaries are built by aggregate_summaries, from
+    irrigated field-years when summaries.irrigated_only is set. Each HA summary is written
+    twice: every field in the HA (including out-of-state fields of HAs that cross the state
+    line), and Nevada fields only (..._NV_fields_only.csv).
 
 Removed paths that this workflow does not use: the threshold irrigation filter
 (load_basin_specific_thresholds, classify_field_activity_status,
@@ -50,6 +52,7 @@ import geopandas as gpd
 import numpy as np
 from pathlib import Path
 import warnings
+from numba import njit   # NWI T1: compiled carry-forward recurrence
 
 # NWI T1: run configuration and the copied allocation utilities
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'utils'))
@@ -72,6 +75,21 @@ FIELD_ATTRIBUTE_COLUMNS = [
 
 # --- Helper function to load climatologies  ---
 def load_climatologies(climatology_dir, gap_windows):
+    """
+    Load the per-window EToF climatology files (NWI T1: docstring added).
+
+    Parameters
+    ----------
+    climatology_dir : str or Path
+        Folder with etof_climatology_<start>_<end>.csv files from calculate_field_climatologies.py.
+    gap_windows : list of tuple
+        (start_year, end_year) windows.
+
+    Returns
+    -------
+    dict
+        {'<start>_<end>': DataFrame indexed by OPENET_ID with HA_NAME_CODE and EToF_climo_01..12}.
+    """
     climatologies = {}
     print(f"Attempting to load EToF climatologies from: {climatology_dir}")
     for start_year, end_year in gap_windows:
@@ -92,6 +110,24 @@ def load_climatologies(climatology_dir, gap_windows):
     return climatologies
 
 def apply_linear_interpolation_etof(df, group_cols=['HA_NAME_CODE', 'OPENET_ID']):
+    """
+    Fill one-month EToF gaps by linear interpolation within each field (NWI T1: docstring added).
+
+    pandas ``interpolate(method='linear', limit=1)`` fills at most one consecutive missing
+    month; filled rows are flagged 'linear_1month' and their ETA_MM is EToF x ETO_MM.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Field-month rows with ETA_MM, ETO_MM, YEAR, MONTH and ``group_cols``.
+    group_cols : list of str
+        Columns identifying one field's series.
+
+    Returns
+    -------
+    pd.DataFrame
+        ``df`` sorted by field and date, with EToF, EToF_interpolated and interpolation_method.
+    """
     print("Applying linear interpolation for EToF gaps...")
     
     if 'EToF' not in df.columns:
@@ -125,6 +161,29 @@ def apply_linear_interpolation_etof(df, group_cols=['HA_NAME_CODE', 'OPENET_ID']
     return df
 
 def apply_climatology_gap_filling_etof(df, climatologies, gap_windows, group_cols=['HA_NAME_CODE', 'OPENET_ID']):
+    """
+    Fill the remaining EToF gaps from each field's climatology (NWI T1: docstring added).
+
+    A gap in year Y and month M takes the field's EToF_climo_M from the window containing Y
+    (the nearest window if none contains it). Filled rows are flagged 'climatology'; gaps
+    with no climatology value stay missing.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Output of apply_linear_interpolation_etof.
+    climatologies : dict
+        Output of load_climatologies.
+    gap_windows : list of tuple
+        (start_year, end_year) windows.
+    group_cols : list of str
+        Columns identifying a field (OPENET_ID and HA_NAME_CODE must match the climatology).
+
+    Returns
+    -------
+    pd.DataFrame
+        ``df`` with EToF_interpolated, interpolation_method and ETA_MM updated for filled rows.
+    """
     print("Applying climatology EToF gap-filling to ALL remaining gaps...")
     if not climatologies:
         print("No climatologies provided. Skipping climatology fill.")
@@ -137,59 +196,43 @@ def apply_climatology_gap_filling_etof(df, climatologies, gap_windows, group_col
     if gaps_to_fill_mask.sum() == 0:
         return df
     
-    # VECTORIZED: Only process rows that need filling
-    gaps_df = df[gaps_to_fill_mask].copy()
-    
-    # Pre-create lookups for speed
-    def get_climo_values_vectorized(gaps_subset):
-        results = []
-        for idx, row in gaps_subset.iterrows():
-            # Find window
-            window_key = None
-            for start_year, end_year in gap_windows:
-                if start_year <= row['YEAR'] <= end_year:
-                    window_key = f"{start_year}_{end_year}"
-                    break
-            
-            if window_key is None:
-                closest_window = min(gap_windows, key=lambda w: min(abs(row['YEAR'] - w[0]), abs(row['YEAR'] - w[1])))
-                window_key = f"{closest_window[0]}_{closest_window[1]}"
-            
-            # Get climatology
-            climo_value = np.nan
-            if window_key in climatologies:
-                climo_df = climatologies[window_key]
-                field_id = row['OPENET_ID']
-                
-                if field_id in climo_df.index:
-                    field_row = climo_df.loc[[field_id]]
-                    
-                    if 'HA_NAME_CODE' in field_row.columns:
-                        field_row = field_row[field_row['HA_NAME_CODE'] == row['HA_NAME_CODE']]
-                    
-                    if not field_row.empty:
-                        climo_col = f"EToF_climo_{row['MONTH']:02d}"
-                        if climo_col in field_row.columns:
-                            climo_value = field_row[climo_col].iloc[0]
-            
-            results.append(climo_value)
-        
-        return results
-    
-    # Get climatology values only for gaps
+    # NWI T1 (speed): the original looked each gap up row by row (iterrows). This joins
+    # the gaps to the climatology tables instead, with the same rules: the window that
+    # contains the year (or the nearest window), the field's row for its HA_NAME_CODE
+    # (first row if repeated), and the column EToF_climo_<month>. Gaps whose climatology
+    # value is missing stay unfilled.
+    gaps_df = df.loc[gaps_to_fill_mask, ['OPENET_ID', 'HA_NAME_CODE', 'YEAR', 'MONTH']].copy()
+
+    def window_for_year(year):
+        for start_year, end_year in gap_windows:
+            if start_year <= year <= end_year:
+                return f"{start_year}_{end_year}"
+        closest_window = min(gap_windows, key=lambda w: min(abs(year - w[0]), abs(year - w[1])))
+        return f"{closest_window[0]}_{closest_window[1]}"
+
+    year_to_window = {year: window_for_year(year) for year in gaps_df['YEAR'].unique()}
+    gaps_df['window'] = gaps_df['YEAR'].map(year_to_window)
+    climo_long = []
+    for window_key, climo_df in climatologies.items():
+        long = climo_df.reset_index().drop_duplicates(['OPENET_ID', 'HA_NAME_CODE'], keep='first').melt(
+            id_vars=['OPENET_ID', 'HA_NAME_CODE'],
+            value_vars=[f'EToF_climo_{m:02d}' for m in range(1, 13)],
+            var_name='climo_col', value_name='climo_value')
+        long['MONTH'] = long['climo_col'].str[-2:].astype(int)
+        long['window'] = window_key
+        climo_long.append(long.drop(columns=['climo_col']))
+    climo_long = pd.concat(climo_long, ignore_index=True)
     print(f"Looking up climatology values for {len(gaps_df)} gaps...")
-    climo_values = get_climo_values_vectorized(gaps_df)
-    
-    # Update only the gaps with valid climatology values
-    valid_climo_mask = ~pd.isna(climo_values)
-    gaps_df_valid = gaps_df[valid_climo_mask]
-    climo_values_valid = [v for v in climo_values if pd.notna(v)]
-    
+    matched = gaps_df.reset_index().merge(
+        climo_long, on=['OPENET_ID', 'HA_NAME_CODE', 'window', 'MONTH'], how='inner', validate='many_to_one')
+    matched = matched[matched['climo_value'].notna()].set_index('index')
+
     # Vectorized assignment
-    df.loc[gaps_df_valid.index, 'EToF_interpolated'] = climo_values_valid
-    df.loc[gaps_df_valid.index, 'interpolation_method'] = 'climatology'
-    df.loc[gaps_df_valid.index, 'ETA_MM'] = df.loc[gaps_df_valid.index, 'EToF_interpolated'] * df.loc[gaps_df_valid.index, 'ETO_MM']
-    
+    df.loc[matched.index, 'EToF_interpolated'] = matched['climo_value']
+    df.loc[matched.index, 'interpolation_method'] = 'climatology'
+    df.loc[matched.index, 'ETA_MM'] = df.loc[matched.index, 'EToF_interpolated'] * df.loc[matched.index, 'ETO_MM']
+    gaps_df_valid = matched
+
     filled_count = len(gaps_df_valid)
     print(f"Climatology filled {filled_count} gaps")
     print(f"Remaining unfilled: {gaps_to_fill_mask.sum() - filled_count}")
@@ -198,6 +241,69 @@ def apply_climatology_gap_filling_etof(df, climatologies, gap_windows, group_col
 
 
 # --- Winter Moisture Carry-Forward ---
+@njit(cache=True)
+def _carryforward_recurrence(net, eta, eff, cap, month, field_start, reset_month):
+    """
+    NWI T1 (speed): the original per-row carry-forward loop, compiled with numba.
+
+    For each row in field/date order:
+      * a missing net ET breaks the chain (storage back to 0) and leaves the outputs empty;
+      * storage starts over at a field's first row, after a missing month, and in
+        ``reset_month``;
+      * raw = this month's net ET plus last month's (negative) storage;
+      * storage = raw, bounded to [-cap, 0]; anything below -cap is overflow;
+      * final net ET = raw if raw >= 0, else 0; applied water = final / efficiency.
+
+    Parameters
+    ----------
+    net, eta, eff, cap : np.ndarray
+        Net ET, ETa, irrigation efficiency and storage cap per row (acre-ft, fraction).
+    month : np.ndarray
+        Calendar month per row.
+    field_start : np.ndarray of bool
+        True at the first row of each field.
+    reset_month : int
+        Month in which storage resets.
+
+    Returns
+    -------
+    tuple of np.ndarray
+        final net ET, storage (<= 0), overflow, adjusted effective precipitation (ETa - final),
+        applied water.
+    """
+    n = net.size
+    final_net = np.full(n, np.nan)
+    storage = np.full(n, np.nan)
+    overflow = np.zeros(n)
+    adjusted_ppt = np.full(n, np.nan)
+    final_ar = np.full(n, np.nan)
+    previous_storage = 0.0
+    previous_valid = False
+    for i in range(n):
+        if field_start[i]:
+            previous_storage = 0.0
+            previous_valid = False
+        current_net = net[i]
+        if not np.isfinite(current_net):
+            previous_storage = 0.0
+            previous_valid = False
+            continue
+        reset = (not previous_valid) or month[i] == reset_month
+        raw_storage = current_net if reset else previous_storage + current_net
+        lower_bound = -cap[i] if np.isfinite(cap[i]) else -np.inf
+        bounded_storage = min(0.0, max(raw_storage, lower_bound))
+        final_value = raw_storage if raw_storage >= 0 else 0.0
+        final_net[i] = final_value
+        storage[i] = bounded_storage
+        overflow[i] = max(lower_bound - raw_storage, 0.0) if np.isfinite(cap[i]) else 0.0
+        adjusted_ppt[i] = eta[i] - final_value
+        if np.isfinite(eff[i]):
+            final_ar[i] = final_value / eff[i] if final_value > 0 else 0.0
+        previous_storage = bounded_storage
+        previous_valid = True
+    return final_net, storage, overflow, adjusted_ppt, final_ar
+
+
 def apply_winter_moisture_carryforward(df, 
                                      eta_vol_intermediate_col,           # Intermediate ETa volume after interpolation
                                      net_et_vol_intermediate_col,    # Intermediate NetET volume (ETa_interp - EffPPT)
@@ -207,6 +313,42 @@ def apply_winter_moisture_carryforward(df,
                                      rooting_depth_m=1.5,
                                      year_reset_month=1, # Calendar month to reset carry-forward (January)
                                      group_cols=['HA_NAME_CODE', 'OPENET_ID']):
+    """
+    Carry winter surplus soil water forward into later months (NWI T1: docstring added).
+
+    For each field, months are processed in order. A negative net ET (more effective
+    precipitation than ET) is stored as soil water, up to the cap AWC x rooting depth x acres;
+    anything above the cap is overflow. Stored water offsets later positive net ET. Storage
+    resets every ``year_reset_month`` and after any month with missing net ET.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Field-month rows.
+    eta_vol_intermediate_col : str
+        ETa volume column (acre-ft).
+    net_et_vol_intermediate_col : str
+        Net ET volume before carry-forward (acre-ft).
+    ar_original_vol_col : str
+        Not used; kept for the original call signature.
+    irr_eff_col : str
+        Irrigation efficiency column, used for applied water = net ET / efficiency.
+    awc_col : str
+        Available water capacity (fraction).
+    rooting_depth_m : float
+        Rooting depth for the storage cap.
+    year_reset_month : int
+        Calendar month when storage resets (January).
+    group_cols : list of str
+        Columns identifying one field's series.
+
+    Returns
+    -------
+    pd.DataFrame
+        Copy of ``df`` (index reset) with NetET_final_acre_ft, AR_final_acre_ft,
+        Water_Surplus_Cumulative_acre_ft (stored water), Eff_PPT_Adjusted_acre_ft, PAW_ft,
+        Soil_Moisture_Cap_acre_ft and Soil_Moisture_Overflow_acre_ft.
+    """
     print(
         f"Applying winter moisture carry-forward using ETa: "
         f"{eta_vol_intermediate_col}, NetET: {net_et_vol_intermediate_col}"
@@ -258,42 +400,21 @@ def apply_winter_moisture_carryforward(df,
     adjusted_ppt = np.full(len(result), np.nan, dtype=float)
     overflow = np.zeros(len(result), dtype=float)
 
-    for positions in groups.values():
-        previous_storage = 0.0
-        previous_valid = False
-        for position in np.asarray(positions, dtype=int):
-            current_net = net_values[position]
-            if not np.isfinite(current_net):
-                # Match the prior behavior: a missing month breaks the
-                # carry-forward chain until the next valid month/reset.
-                previous_storage = 0.0
-                previous_valid = False
-                continue
-
-            current_date = result.at[position, 'date']
-            reset = (not previous_valid) or current_date.month == year_reset_month
-            raw_storage = current_net if reset else previous_storage + current_net
-            cap = cap_values[position]
-            lower_bound = -float(cap) if np.isfinite(cap) else -np.inf
-            bounded_storage = min(0.0, max(raw_storage, lower_bound))
-            final_value = raw_storage if raw_storage >= 0 else 0.0
-
-            final_net[position] = final_value
-            storage[position] = bounded_storage
-            overflow[position] = (
-                max(lower_bound - raw_storage, 0.0)
-                if np.isfinite(cap) else 0.0
-            )
-            adjusted_ppt[position] = eta_values[position] - final_value
-            if np.isfinite(eff_values[position]):
-                final_ar[position] = (
-                    final_value / eff_values[position]
-                    if final_value > 0 else 0.0
-                )
-            else:
-                final_ar[position] = np.nan
-            previous_storage = bounded_storage
-            previous_valid = True
+    # NWI T1 (speed): the month-by-month recurrence below is the original loop, compiled
+    # with numba (_carryforward_recurrence). Rows are visited field by field in date order;
+    # field_start marks the first row of each field.
+    # groupby(...).indices gives positions in the date-sorted frame; ``order`` maps them back
+    # to rows of ``result`` (the original indexed ``result`` directly, which is only right
+    # when the input is already sorted, as it is after apply_linear_interpolation_etof).
+    ordered = order[np.concatenate([np.asarray(positions, dtype=np.int64) for positions in groups.values()])]
+    field_start = np.zeros(len(ordered), dtype=np.bool_)
+    first_rows = np.cumsum([0] + [len(positions) for positions in groups.values()])[:-1]
+    field_start[first_rows] = True
+    months = result['date'].dt.month.to_numpy(np.int64)
+    (final_net[ordered], storage[ordered], overflow[ordered], adjusted_ppt[ordered],
+     final_ar[ordered]) = _carryforward_recurrence(
+        net_values[ordered], eta_values[ordered], eff_values[ordered], cap_values[ordered],
+        months[ordered], field_start, int(year_reset_month))
 
     result['NetET_final_acre_ft'] = final_net
     result['AR_final_acre_ft'] = final_ar
@@ -531,6 +652,48 @@ def apply_irrigation_attribute_fallbacks(
     return result
 
 
+def _spi_basin_key(value):
+    """
+    Basin key used to match SPI rows to field rows (same rule as get_basin_year_spi).
+
+    The terminal parenthetical HA code ('Fish Lake Valley (117)' -> '117'), upper case;
+    names without a code are compared as whitespace-normalized upper-case text.
+    """
+    import re
+    text = str(value).strip()
+    match = re.search(r'\(([^)]+)\)\s*$', text)
+    return match.group(1).strip().upper() if match else re.sub(r'\s+', ' ', text).upper()
+
+
+def _build_spi_lookup(spi_data):
+    """
+    NWI T1 (speed): every SPI value keyed by (timescale, month, basin key, year).
+
+    Equivalent to calling get_basin_year_spi for each basin-year: where several rows share
+    a key, the first one is kept, as get_basin_year_spi takes ``.iloc[0]``.
+
+    Parameters
+    ----------
+    spi_data : pd.DataFrame
+        HA_NAME_CODE, YEAR, MONTH and SPI_<k>m columns.
+
+    Returns
+    -------
+    dict
+        {(k, month, basin key, year): SPI value}
+    """
+    keys = spi_data['HA_NAME_CODE'].map(_spi_basin_key)
+    lookup = {}
+    for col in [c for c in spi_data.columns if c.startswith('SPI_') and c.endswith('m')]:
+        timescale = int(col[4:-1])
+        values = pd.DataFrame({'key': keys, 'YEAR': spi_data['YEAR'].astype(int),
+                               'MONTH': spi_data['MONTH'].astype(int), 'spi': spi_data[col]})
+        values = values.drop_duplicates(['key', 'YEAR', 'MONTH'], keep='first')
+        for key, year, month, spi in values.itertuples(index=False):
+            lookup[(timescale, month, key, year)] = spi
+    return lookup
+
+
 def get_basin_year_spi(
     spi_data,
     basin_code,
@@ -667,8 +830,6 @@ def apply_gw_sw_separation_dynamic(
     print(f"  Mixed: {df_mixed['OPENET_ID'].nunique()} fields")
     
     # Process mixed fields BASIN-BY-BASIN, YEAR-BY-YEAR
-    mixed_gw_parts = []
-    mixed_sw_parts = []
     allocation_stats = []
     
     basins_processed = 0
@@ -679,6 +840,13 @@ def apply_gw_sw_separation_dynamic(
         import re
         match = re.search(r'\(([^)]+)\)\s*$', str(value))
         return match.group(1) if match else str(value)
+
+    # NWI T1 (speed): build the SPI lookup and each basin's years once. get_basin_year_spi
+    # re-read the whole SPI table for every basin-year; this dictionary holds the same
+    # values, keyed by (timescale, month, basin code, year), using the same basin-code rule.
+    spi_lookup = _build_spi_lookup(spi_data)
+    basin_years = {basin: sorted(years) for basin, years in
+                   df_mixed.groupby(basin_column)['YEAR'].unique().items()}
 
     for basin_code in df_mixed[basin_column].unique():
         # Get basin configuration
@@ -731,15 +899,16 @@ def apply_gw_sw_separation_dynamic(
             reference_month = spi_reference_month
             print(f"  ⚠️  Basin {basin_code} not in config, using default (12m SPI, dynamic)")
         
-        basin_mixed = df_mixed[df_mixed[basin_column] == basin_code].copy()
-        
-        if len(basin_mixed) == 0:
+        # NWI T1 (speed): the original copied the basin's rows and then each year's rows
+        # inside this loop. Here the loop only decides the SW ratio for each basin-year
+        # (same SPI, same spi_to_sw_ratio call, same fallback); the rows are split once,
+        # after the loop, by joining these ratios onto the mixed-field rows.
+        years = basin_years.get(basin_code)
+        if years is None or len(years) == 0:
             continue
-        
+
         basins_processed += 1
-        
-        # Process EACH YEAR separately with year-specific SPI
-        years = sorted(basin_mixed['YEAR'].unique())
+
         print(f"\n  [{basins_processed}] {basin_code}")
         print(f"      SPI timescale: {spi_timescale}m | Method: {allocation_method} | Years: {len(years)}")
         if use_uniform_mean_ratio and center_ratio is None:
@@ -748,15 +917,12 @@ def apply_gw_sw_separation_dynamic(
             print(f"      Mean ratio: {mean_ratio:.2f} (explicit center anchor) | Original from optimization: {mean_ratio_raw:.2f}")
         else:
             print(f"      Mean ratio: {mean_ratio:.2f} (basin-specific from optimization)")
-        
+
         year_ratios = []
-        
+
         for year in years:
-            # Get SPI for this specific basin/year/timescale
-            spi_value = get_basin_year_spi(
-                spi_data, basin_code, year, spi_timescale,
-                reference_month=reference_month,
-            )
+            # Get SPI for this specific basin/year/timescale (same lookup as get_basin_year_spi)
+            spi_value = spi_lookup.get((spi_timescale, reference_month, _spi_basin_key(basin_code), year), np.nan)
 
             if np.isnan(spi_value):
                 # Fallback to mean ratio if SPI not available
@@ -770,41 +936,9 @@ def apply_gw_sw_separation_dynamic(
                     center_ratio=center_ratio,
                 )
                 spi_status = f'SPI={spi_value:+.2f}'
-            
+
             year_ratios.append(ratio)
-            
-            # Filter to this year
-            year_mixed = basin_mixed[basin_mixed['YEAR'] == year].copy()
-            
-            if len(year_mixed) == 0:
-                continue
-            
-            # Create SW and GW portions for THIS YEAR with YEAR-SPECIFIC ratio
-            year_mixed_sw = year_mixed.copy()
-            year_mixed_gw = year_mixed.copy()
-            
-            # Apply YEAR-SPECIFIC ratio (THIS IS THE KEY DIFFERENCE!)
-            year_mixed_sw['ACRES_FTR_GEOM'] = year_mixed_sw['ACRES_FTR_GEOM'] * ratio
-            year_mixed_gw['ACRES_FTR_GEOM'] = year_mixed_gw['ACRES_FTR_GEOM'] * (1 - ratio)
-            
-            # Add tracking metadata
-            year_mixed_sw['water_source'] = 'SW_from_mixed'
-            year_mixed_gw['water_source'] = 'GW_from_mixed'
-            year_mixed_sw['allocation_method'] = allocation_method
-            year_mixed_gw['allocation_method'] = allocation_method
-            year_mixed_sw['allocation_ratio'] = ratio
-            year_mixed_gw['allocation_ratio'] = 1 - ratio
-            year_mixed_sw['spi_value'] = spi_value
-            year_mixed_gw['spi_value'] = spi_value
-            year_mixed_sw['spi_timescale'] = spi_timescale
-            year_mixed_gw['spi_timescale'] = spi_timescale
-            
-            mixed_sw_parts.append(year_mixed_sw)
-            mixed_gw_parts.append(year_mixed_gw)
-            
             total_allocations += 1
-            
-            # Track statistics
             allocation_stats.append({
                 'basin_code': basin_code,
                 'year': year,
@@ -814,35 +948,51 @@ def apply_gw_sw_separation_dynamic(
                 'spi_value': spi_value,
                 'sw_ratio': ratio,
                 'spi_status': spi_status,
-                'n_mixed_fields': year_mixed['OPENET_ID'].nunique(),
-                'total_mixed_acres': year_mixed['ACRES_FTR_GEOM'].sum(),
-                'acres_to_sw': year_mixed_sw['ACRES_FTR_GEOM'].sum(),
-                'acres_to_gw': year_mixed_gw['ACRES_FTR_GEOM'].sum()
             })
-        
+
         # Basin-year summary
         if len(year_ratios) > 0:
             print(f"      SW ratio range: {min(year_ratios):.2f} to {max(year_ratios):.2f} "
                   f"(mean={np.mean(year_ratios):.2f})")
-    
+
     print(f"\n{'='*80}")
     print(f"Dynamic allocation summary:")
     print(f"  Total basins processed: {basins_processed}")
     print(f"  Using optimized method: {basins_using_optimized}")
     print(f"  Total year-specific allocations: {total_allocations}")
     print(f"{'='*80}")
-    
-    # Combine all years/basins
-    if mixed_gw_parts:
-        df_mixed_gw_all = pd.concat(mixed_gw_parts, ignore_index=True)
-    else:
-        df_mixed_gw_all = pd.DataFrame()
-    
-    if mixed_sw_parts:
-        df_mixed_sw_all = pd.concat(mixed_sw_parts, ignore_index=True)
-    else:
-        df_mixed_sw_all = pd.DataFrame()
-    
+
+    # NWI T1 (speed): split every mixed field-year at once. Each row gets its basin-year's
+    # ratio; the SW copy keeps ratio x acres and the GW copy (1 - ratio) x acres, exactly as
+    # the original did year by year.
+    allocation_stats_df = pd.DataFrame(allocation_stats)
+    ratios = allocation_stats_df[['basin_code', 'year', 'allocation_method', 'spi_value', 'sw_ratio',
+                                  'spi_timescale']].rename(columns={'basin_code': basin_column, 'year': 'YEAR'})
+    mixed_with_ratio = df_mixed.merge(ratios, on=[basin_column, 'YEAR'], how='inner', validate='many_to_one')
+    df_mixed_sw_all = mixed_with_ratio.copy()
+    df_mixed_gw_all = mixed_with_ratio.copy()
+    df_mixed_sw_all['ACRES_FTR_GEOM'] = mixed_with_ratio['ACRES_FTR_GEOM'] * mixed_with_ratio['sw_ratio']
+    df_mixed_gw_all['ACRES_FTR_GEOM'] = mixed_with_ratio['ACRES_FTR_GEOM'] * (1 - mixed_with_ratio['sw_ratio'])
+    # NWI T1 (fix): irrigated acres are split the same way, so the GW and SW components add up
+    # to the field (the original kept the full ACRES_IRR on both halves of a mixed field).
+    if 'ACRES_IRR' in mixed_with_ratio.columns:
+        df_mixed_sw_all['ACRES_IRR'] = mixed_with_ratio['ACRES_IRR'] * mixed_with_ratio['sw_ratio']
+        df_mixed_gw_all['ACRES_IRR'] = mixed_with_ratio['ACRES_IRR'] * (1 - mixed_with_ratio['sw_ratio'])
+    df_mixed_sw_all['water_source'] = 'SW_from_mixed'
+    df_mixed_gw_all['water_source'] = 'GW_from_mixed'
+    df_mixed_sw_all['allocation_ratio'] = mixed_with_ratio['sw_ratio']
+    df_mixed_gw_all['allocation_ratio'] = 1 - mixed_with_ratio['sw_ratio']
+    df_mixed_sw_all = df_mixed_sw_all.drop(columns=['sw_ratio'])
+    df_mixed_gw_all = df_mixed_gw_all.drop(columns=['sw_ratio'])
+
+    # Basin-year statistics (same columns as the original)
+    mixed_totals = mixed_with_ratio.groupby([basin_column, 'YEAR']).agg(
+        n_mixed_fields=('OPENET_ID', 'nunique'), total_mixed_acres=('ACRES_FTR_GEOM', 'sum')).reset_index()
+    mixed_totals = mixed_totals.rename(columns={basin_column: 'basin_code', 'YEAR': 'year'})
+    allocation_stats_df = allocation_stats_df.merge(mixed_totals, on=['basin_code', 'year'], how='left')
+    allocation_stats_df['acres_to_sw'] = allocation_stats_df['total_mixed_acres'] * allocation_stats_df['sw_ratio']
+    allocation_stats_df['acres_to_gw'] = allocation_stats_df['total_mixed_acres'] * (1 - allocation_stats_df['sw_ratio'])
+
     # Add tracking to pure fields
     df_gw_pure['water_source'] = 'GW'
     df_sw_pure['water_source'] = 'SW'
@@ -858,8 +1008,6 @@ def apply_gw_sw_separation_dynamic(
     # Final combination
     df_gw_combined = pd.concat([df_gw_pure, df_mixed_gw_all], ignore_index=True)
     df_sw_combined = pd.concat([df_sw_pure, df_mixed_sw_all], ignore_index=True)
-    
-    allocation_stats_df = pd.DataFrame(allocation_stats)
     
     print(f"\nFinal dataset sizes:")
     print(f"  GW: {len(df_gw_combined)} records, {df_gw_combined['OPENET_ID'].nunique()} fields")
@@ -1023,9 +1171,18 @@ def apply_static_basin_overrides(fieldsdf, static_overrides):
     fieldsdf = fieldsdf.copy()
     fieldsdf['IRR_SRC_ORIGINAL'] = fieldsdf['IRR_SRC']
     fieldsdf['_BASIN_CODE'] = fieldsdf['HYD_AREA_N_new'].astype(str) + ' (' + fieldsdf['HYD_AREA_new'].astype(str) + ')'
+    added_openet_id = 'OPENET_ID' not in fieldsdf.columns
+    if added_openet_id:
+        # apply_irr_src_overrides counts fields by OPENET_ID; the 2026-08-20 layer has NWI_ID only
+        fieldsdf['OPENET_ID'] = fieldsdf['NWI_ID']
     fieldsdf = apply_irr_src_overrides(fieldsdf, static_overrides or {}, basin_column='_BASIN_CODE')
+    if added_openet_id:
+        fieldsdf = fieldsdf.drop(columns=['OPENET_ID'])
     changed = fieldsdf['IRR_SRC'].ne(fieldsdf['IRR_SRC_ORIGINAL']) & fieldsdf['IRR_SRC_ORIGINAL'].notna()
-    fieldsdf['IRR_SRC_OVERRIDE'] = np.where(changed, 'basin rule: mixed -> ' + fieldsdf['IRR_SRC'].map({1: 'GW', 2: 'SW'}).fillna(''), '')
+    fieldsdf['IRR_SRC_OVERRIDE'] = np.where(
+        changed,
+        'basin ' + fieldsdf['HYD_AREA_new'].astype(str) + ': mixed->' + fieldsdf['IRR_SRC'].map({1: 'GW', 2: 'SW'}).fillna(''),
+        '')
     return fieldsdf.drop(columns=['_BASIN_CODE'])
 
 
@@ -1072,47 +1229,33 @@ def add_gw_subsidy(df, gw_frac_by_field, irrigated_only=False, irrigated_min_fra
     return df
 
 
-# NWI T1: columns written to the field files, and their names in those files
-FIELD_OUTPUT_COLUMNS = {
-    'NWI_ID': 'NWI_ID', 'NWI_PARENT': 'NWI_PARENT', 'STATE': 'STATE', 'COUNTY_NAME': 'COUNTY_NAME',
-    'HYD_AREA': 'HYD_AREA', 'HYD_AREA_N': 'HYD_AREA_N', 'HA_NAME_CODE': 'HA_NAME_CODE', 'GRIDMET_ID': 'GRIDMET_ID',
-    'IRR_SRC': 'IRR_SRC', 'IRR_SRC_ORIGINAL': 'IRR_SRC_ORIGINAL', 'IRR_SRC_ASSUMED': 'IRR_SRC_ASSUMED',
-    'IRR_SRC_OVERRIDE': 'IRR_SRC_OVERRIDE', 'irr_eff': 'irr_eff', 'ITYPE': 'ITYPE', 'CROP_major': 'CROP_major',
-    'YEAR': 'YEAR', 'MONTH': 'MONTH', 'DATE': 'DATE',
-    'water_source': 'water_source', 'allocation_method': 'allocation_method', 'allocation_ratio': 'allocation_ratio',
-    'spi_value': 'spi_value', 'spi_source': 'spi_source',
-    'ACRES_FTR_GEOM': 'ACRES_FTR_GEOM', 'ACRES_IRR': 'ACRES_IRR', '%_IRRIGATED': '%_IRRIGATED',
-    'ETO_MM': 'ETO_MM', 'ETA_MM_EXPORT': 'ETA_MM_EXPORT', 'EToF': 'EToF', 'EToF_interpolated': 'EToF_interpolated',
-    'interpolation_method': 'interpolation_method', 'ETA_MM_post_interp': 'ETA_MM_post_interp',
-    'PPT_MM': 'PPT_MM', 'EFF_PPT_MM': 'PEFF_MM', 'peff_method': 'peff_method',
-    'gw_frac': 'gw_frac', 'AWC': 'AWC', 'PAW_ft': 'PAW_ft',
-    'ETa_final_acre_ft': 'ETa_final_acre_ft', 'PPT_vol_acre_ft': 'PPT_vol_acre_ft',
-    'Eff_PPT_vol_acre_ft': 'Peff_vol_acre_ft', 'NetET_pre_subsidy_acre_ft': 'NetET_pre_subsidy_acre_ft',
-    'GW_subsidy_potential_acre_ft': 'GW_subsidy_potential_acre_ft', 'GW_subsidy_acre_ft': 'GW_subsidy_acre_ft',
-    'NetET_vol_intermediate_acre_ft': 'NetET_intermediate_acre_ft',
-    'Soil_Moisture_Cap_acre_ft': 'Soil_Moisture_Cap_acre_ft', 'Water_Surplus_Cumulative_acre_ft': 'Soil_Storage_acre_ft',
-    'Soil_Moisture_Overflow_acre_ft': 'Soil_Moisture_Overflow_acre_ft',
-    'Carryforward_Used_acre_ft': 'Carryforward_Used_acre_ft',
-    'NetET_final_acre_ft': 'NetET_final_acre_ft', 'AR_final_acre_ft': 'AR_final_acre_ft',
-    'ETa_final_ft': 'ETa_final_ft', 'NetET_final_ft': 'NetET_final_ft', 'AR_final_ft': 'AR_final_ft',
-    'PPT_final_ft': 'PPT_final_ft',
-}
+# NWI T1: columns written to the field files (names as in the original outputs; additions
+# are listed in docs/legacy/COLUMN_CROSSWALK.md)
+FIELD_OUTPUT_COLUMNS = [
+    'NWI_ID', 'NWI_PARENT', 'STATE', 'COUNTY_NAME', 'HYD_AREA', 'HYD_AREA_N', 'HA_NAME_CODE', 'GRIDMET_ID',
+    'IRR_SRC', 'IRR_SRC_ORIGINAL', 'IRR_SRC_ASSUMED', 'IRR_SRC_OVERRIDE', 'irr_eff', 'ITYPE', 'CROP_major',
+    'YEAR', 'MONTH', 'DATE', 'water_source', 'allocation_method', 'allocation_ratio', 'spi_value', 'spi_source',
+    'ACRES_FTR_GEOM', 'ACRES_IRR', '%_IRRIGATED',
+    'ETO_MM', 'ETA_MM', 'ETA_MM_EXPORT', 'EToF', 'EToF_interpolated', 'interpolation_method', 'ETA_MM_post_interp',
+    'PPT_MM', 'EFF_PPT_MM', 'peff_method', 'gw_frac', 'AWC', 'PAW_ft',
+    'ETa_final_acre_ft', 'PPT_vol_acre_ft', 'Eff_PPT_vol_acre_ft', 'NetET_pre_subsidy_acre_ft',
+    'GW_subsidy_potential_acre_ft', 'GW_subsidy_acre_ft', 'NetET_vol_intermediate_acre_ft',
+    'Soil_Moisture_Cap_acre_ft', 'Water_Surplus_Cumulative_acre_ft', 'Soil_Moisture_Overflow_acre_ft',
+    'Carryforward_Used_acre_ft', 'NetET_final_acre_ft', 'AR_final_acre_ft',
+    'ETa_final_ft', 'NetET_final_ft', 'AR_final_ft', 'PPT_final_ft',
+]
 
 # NWI T1: summary columns (names as in the field files)
 SUMMARY_VOLUME_COLUMNS = [
-    'ACRES_FTR_GEOM', 'ACRES_IRR', 'ETa_final_acre_ft', 'PPT_vol_acre_ft', 'Peff_vol_acre_ft',
-    'NetET_pre_subsidy_acre_ft', 'GW_subsidy_potential_acre_ft', 'GW_subsidy_acre_ft', 'NetET_intermediate_acre_ft',
-    'Soil_Moisture_Cap_acre_ft', 'Soil_Storage_acre_ft', 'Soil_Moisture_Overflow_acre_ft',
+    'ACRES_FTR_GEOM', 'ACRES_IRR', 'ETa_final_acre_ft', 'PPT_vol_acre_ft', 'Eff_PPT_vol_acre_ft',
+    'NetET_pre_subsidy_acre_ft', 'GW_subsidy_potential_acre_ft', 'GW_subsidy_acre_ft', 'NetET_vol_intermediate_acre_ft',
+    'Soil_Moisture_Cap_acre_ft', 'Water_Surplus_Cumulative_acre_ft', 'Soil_Moisture_Overflow_acre_ft',
     'Carryforward_Used_acre_ft', 'NetET_final_acre_ft', 'AR_final_acre_ft',
 ]
-SUMMARY_WEIGHTED_MM_COLUMNS = ['ETO_MM', 'PPT_MM', 'PEFF_MM']
-SUMMARY_STATE_SPLIT_COLUMNS = [
-    'ACRES_FTR_GEOM', 'ETa_final_acre_ft', 'PPT_vol_acre_ft', 'Peff_vol_acre_ft', 'GW_subsidy_acre_ft',
-    'Carryforward_Used_acre_ft', 'NetET_final_acre_ft', 'AR_final_acre_ft', 'n_fields',
-]
+SUMMARY_WEIGHTED_MM_COLUMNS = ['ETO_MM', 'PPT_MM', 'EFF_PPT_MM']
 
 
-def aggregate_summaries(field_rows, keys, basin_year=None, state_split=False):
+def aggregate_summaries(field_rows, keys, basin_year=None):
     """
     NWI T1: sum field-month rows to HA or county summaries.
 
@@ -1125,19 +1268,20 @@ def aggregate_summaries(field_rows, keys, basin_year=None, state_split=False):
     * ETo, PPT and Peff in mm are acre-weighted means;
     * basin-year allocation constants are joined (HA summaries only).
 
+    Count and percentage columns keep the original names: field_count and
+    num_fields_irrigated (fields in the row), is_gw_field / is_sw_field / is_mixed_field
+    (fields by source), percent_gw_fields / percent_sw_fields (mixed fields counted by their
+    share).
+
     Parameters
     ----------
     field_rows : pd.DataFrame
-        Field-month rows with the field-file column names (FIELD_OUTPUT_COLUMNS values),
-        plus sw_share (SW share of the field that year) for the field-share percentages.
+        Field-month rows with the field-file columns (FIELD_OUTPUT_COLUMNS), plus sw_share
+        (SW share of the field that year) for the field-share percentages.
     keys : list of str
         Grouping columns, e.g. HA_NAME_CODE, HYD_AREA, HYD_AREA_N, YEAR, MONTH.
     basin_year : pd.DataFrame, optional
         Allocation constants per HYD_AREA and YEAR to join.
-    state_split : bool
-        Also report SUMMARY_STATE_SPLIT_COLUMNS for Nevada fields (``_NV``) and fields
-        outside Nevada (``_outside_NV``).
-
     Returns
     -------
     pd.DataFrame
@@ -1152,10 +1296,10 @@ def aggregate_summaries(field_rows, keys, basin_year=None, state_split=False):
         table[f'_{col}_acres'] = acres.where(field_rows[col].notna(), 0)
 
     source = field_rows['IRR_SRC'].astype(float)
-    table['n_fields'] = 1
-    table['n_gw_fields'] = (source == 1).astype(int)
-    table['n_sw_fields'] = (source == 2).astype(int)
-    table['n_mixed_fields'] = (source == 3).astype(int)
+    table['field_count'] = 1
+    table['is_gw_field'] = (source == 1).astype(int)
+    table['is_sw_field'] = (source == 2).astype(int)
+    table['is_mixed_field'] = (source == 3).astype(int)
     table['n_fields_irr_src_assumed'] = field_rows['IRR_SRC_ASSUMED'].astype(bool).astype(int)
     table['n_fields_eta_interpolated'] = (field_rows['interpolation_method'] == 'linear_1month').astype(int)
     table['n_fields_eta_climatology'] = (field_rows['interpolation_method'] == 'climatology').astype(int)
@@ -1166,15 +1310,9 @@ def aggregate_summaries(field_rows, keys, basin_year=None, state_split=False):
     # Field-equivalents: a mixed field counts by its GW share for the year
     table['_gw_equivalent'] = np.select([source == 1, source == 2], [1.0, 0.0], 1.0 - field_rows['sw_share'])
 
-    if state_split:
-        in_nevada = (field_rows['STATE'] == 'NV').to_numpy()
-        for col in SUMMARY_STATE_SPLIT_COLUMNS:
-            table[f'{col}_NV'] = table[col].where(in_nevada, 0)
-            table[f'{col}_outside_NV'] = table[col].where(~in_nevada, 0)
-
     summary = table.groupby(keys, as_index=False, sort=True).sum(min_count=1)
     for col in summary.columns:
-        if col.endswith(('_acre_ft', '_acre_ft_NV', '_acre_ft_outside_NV')):
+        if col.endswith('_acre_ft'):
             summary[col] = summary[col].fillna(0.0)
 
     area = summary['ACRES_FTR_GEOM'].replace(0, np.nan)
@@ -1187,8 +1325,9 @@ def aggregate_summaries(field_rows, keys, basin_year=None, state_split=False):
     summary['GW_subsidy_ft'] = summary['GW_subsidy_acre_ft'] / area
     summary['irr_eff_effective'] = summary['NetET_final_acre_ft'] / summary['AR_final_acre_ft'].replace(0, np.nan)
     summary['pct_acres_missing_eta'] = 100 * summary['_acres_missing_eta'] / area
-    summary['pct_fields_gw_equivalent'] = 100 * summary['_gw_equivalent'] / summary['n_fields']
-    summary['pct_fields_sw_equivalent'] = 100 - summary['pct_fields_gw_equivalent']
+    summary['num_fields_irrigated'] = summary['field_count']
+    summary['percent_gw_fields'] = 100 * summary['_gw_equivalent'] / summary['field_count']
+    summary['percent_sw_fields'] = 100 - summary['percent_gw_fields']
     summary = summary.drop(columns=[col for col in summary.columns if col.startswith('_')])
 
     if basin_year is not None:
@@ -1508,12 +1647,14 @@ def process_field_summaries(cfg, paths, spi_data, output_dir, summary_dir, write
         # NWI T1: field files with the documented column names (docs/DATA_DICTIONARY.md)
         df_to_process = df_to_process.sort_values(['NWI_ID', 'YEAR', 'MONTH'], kind='mergesort').reset_index(drop=True)
         df_to_process['DATE'] = pd.to_datetime(dict(year=df_to_process['YEAR'], month=df_to_process['MONTH'], day=1)).dt.strftime('%Y-%m-%d')
-        field_output = df_to_process[list(FIELD_OUTPUT_COLUMNS)].rename(columns=FIELD_OUTPUT_COLUMNS)
+        field_output = df_to_process[FIELD_OUTPUT_COLUMNS]
+        # Original file names: ..._EToF_final_GW / _SW for the components, ..._EToF_final for the whole field
+        field_suffix = '' if dataset_name == 'ALL' else f'_{dataset_name}'
         if write_field_files:
-            field_output.to_parquet(output_dir / f'field_summaries_{dataset_name}.parquet', index=False)
+            field_output.to_parquet(output_dir / f'field_summaries_EToF_final{field_suffix}.parquet', index=False)
             if cfg['outputs']['write_field_csv']:
-                field_output.to_csv(output_dir / f'field_summaries_{dataset_name}.csv', index=False)
-            print(f"Field summaries saved to: {output_dir / f'field_summaries_{dataset_name}.csv'}")
+                field_output.to_csv(output_dir / f'field_summaries_EToF_final{field_suffix}.csv', index=False)
+            print(f"Field summaries saved to: {output_dir / f'field_summaries_EToF_final{field_suffix}.csv'}")
         summary_rows[dataset_name] = field_output.assign(
             sw_share=df_to_process['sw_share'].to_numpy(), IN_NV_COUNTY=df_to_process['IN_NV_COUNTY'].to_numpy())
         print(f"{dataset_name}: interpolation methods {df_to_process['interpolation_method'].value_counts().to_dict()}")
@@ -1550,15 +1691,26 @@ def process_field_summaries(cfg, paths, spi_data, output_dir, summary_dir, write
         return rows[rows['%_IRRIGATED'] > threshold]
 
     flux_columns = [col for col in SUMMARY_VOLUME_COLUMNS
-                    if col not in ('ACRES_FTR_GEOM', 'ACRES_IRR', 'Soil_Moisture_Cap_acre_ft', 'Soil_Storage_acre_ft')]
-    pct_columns = ['pct_fields_gw_equivalent', 'pct_fields_sw_equivalent']
+                    if col not in ('ACRES_FTR_GEOM', 'ACRES_IRR', 'Soil_Moisture_Cap_acre_ft',
+                                   'Water_Surplus_Cumulative_acre_ft')]
+    pct_columns = ['percent_gw_fields', 'percent_sw_fields']
     ha_keys = ['HA_NAME_CODE', 'HYD_AREA', 'HYD_AREA_N', 'YEAR', 'MONTH']
     county_keys = ['COUNTY_NAME', 'YEAR', 'MONTH']
-    all_population = summary_population(summary_rows['ALL'])
-    nevada_all = all_population[all_population['IN_NV_COUNTY'].fillna(False).astype(bool)]
+
+    def nevada_fields(rows):
+        """Rows of fields in Nevada (STATE == 'NV')."""
+        return rows[rows['STATE'] == 'NV']
+
+    def in_nevada_county(rows):
+        """Rows of fields with a Nevada county assignment."""
+        return rows[rows['IN_NV_COUNTY'].fillna(False).astype(bool)]
+
     # Field-share percentages describe all fields in the HA or county, so they come from ALL.
-    pct_ha = aggregate_summaries(all_population, ha_keys)[ha_keys + pct_columns]
-    pct_county = aggregate_summaries(nevada_all, county_keys)[county_keys + pct_columns]
+    all_population = summary_population(summary_rows['ALL'])
+    pct_ha_all = aggregate_summaries(all_population, ha_keys)[ha_keys + pct_columns]
+    pct_ha_nv = aggregate_summaries(nevada_fields(all_population), ha_keys)[ha_keys + pct_columns]
+    pct_county = aggregate_summaries(in_nevada_county(all_population), county_keys)[county_keys + pct_columns]
+
     statewide = []
     for dataset_name, rows in summary_rows.items():
         irrigated = rows['%_IRRIGATED'] > threshold
@@ -1567,14 +1719,21 @@ def process_field_summaries(cfg, paths, spi_data, output_dir, summary_dir, write
             annual.insert(0, 'population', population)
             annual.insert(0, 'component', dataset_name)
             statewide.append(annual.reset_index())
+
+        # Original file names: ..._EToF_final_GW / _SW for the components, ..._EToF_final for the whole field
+        suffix = '' if dataset_name == 'ALL' else f'_{dataset_name}'
         population_rows = summary_population(rows)
         print(f"Step 7: Aggregating {dataset_name} by HA and county ({len(population_rows):,} field-months)...")
-        ha_summary = aggregate_summaries(population_rows, ha_keys, basin_year, state_split=True).drop(columns=pct_columns)
-        ha_summary.merge(pct_ha, on=ha_keys, how='left').to_csv(summary_dir / f'ha_summaries_{dataset_name}.csv', index=False)
-        nevada_rows = population_rows[population_rows['IN_NV_COUNTY'].fillna(False).astype(bool)]
-        county_summary = aggregate_summaries(nevada_rows, county_keys).drop(columns=pct_columns)
+        # HA summaries, two files: every field mapped to the HA (including out-of-state fields
+        # of HAs that cross the state line), and Nevada fields only.
+        for file_tag, ha_rows, pct_ha in (('', population_rows, pct_ha_all),
+                                          ('_NV_fields_only', nevada_fields(population_rows), pct_ha_nv)):
+            ha_summary = aggregate_summaries(ha_rows, ha_keys, basin_year).drop(columns=pct_columns)
+            ha_summary.merge(pct_ha, on=ha_keys, how='left').to_csv(
+                summary_dir / f'ha_summaries_EToF_final{suffix}{file_tag}.csv', index=False)
+        county_summary = aggregate_summaries(in_nevada_county(population_rows), county_keys).drop(columns=pct_columns)
         county_summary.merge(pct_county, on=county_keys, how='left').to_csv(
-            summary_dir / f'county_summaries_{dataset_name}.csv', index=False)
+            summary_dir / f'county_wide_summaries_EToF_final{suffix}.csv', index=False)
     pd.concat(statewide).to_csv(summary_dir / 'statewide_annual_totals.csv', index=False)
     (summary_dir / 'run_checks.json').write_text(json.dumps(checks, indent=2, default=str))
     print(f"Summaries saved to: {summary_dir}")

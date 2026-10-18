@@ -24,7 +24,7 @@ KEYS = ["HA_NAME_CODE", "YEAR", "MONTH"]
 REPRODUCTION_VARIANTS = ["v0a_reproduce_0823_no_static", "v0b_reproduce_0823_static153"]
 BRIDGE_ORDER = ["v0a_reproduce_0823_no_static", "v1_basin_overrides", "v2_prism_spi_d24",
                 "v3_prism_ppt_otter_peff", "v4a_gw_subsidy_no_climatology", "v4_final"]
-BRIDGE_COLUMNS = ["ETa_final_acre_ft", "PPT_vol_acre_ft", "Peff_vol_acre_ft", "GW_subsidy_acre_ft",
+BRIDGE_COLUMNS = ["ETa_final_acre_ft", "PPT_vol_acre_ft", "Eff_PPT_vol_acre_ft", "GW_subsidy_acre_ft",
                   "Carryforward_Used_acre_ft", "NetET_final_acre_ft", "AR_final_acre_ft"]
 
 
@@ -65,7 +65,7 @@ def reproduction_check(cfg, paths):
             continue
         for component in ["GW", "SW"]:
             delivered = delivered_ha_summary(cfg["inputs"]["reference_package_dir"], component)
-            ours = pd.read_csv(variant_dir / f"ha_summaries_{component}.csv", usecols=KEYS + CHECK_COLUMNS)
+            ours = pd.read_csv(variant_dir / f"ha_summaries_EToF_final_{component}.csv", usecols=KEYS + CHECK_COLUMNS)
             joined = delivered.merge(ours, on=KEYS, how="outer", suffixes=("_0823", "_new"), indicator=True)
             for col in CHECK_COLUMNS:
                 old, new = joined[f"{col}_0823"].fillna(0), joined[f"{col}_new"].fillna(0)

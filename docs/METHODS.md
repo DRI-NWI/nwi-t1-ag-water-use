@@ -83,7 +83,7 @@ For each field-month:
 ```
 NetET_pre_subsidy  = ETa − Peff
 GW_subsidy         = min(f × ETa, max(NetET_pre_subsidy, 0))
-NetET_intermediate = NetET_pre_subsidy − GW_subsidy
+NetET_vol_intermediate = NetET_pre_subsidy − GW_subsidy
 ```
 
 Like Peff, the GW subsidy is subtracted in every field-month. It only offsets a positive
@@ -91,13 +91,13 @@ requirement, so groundwater never enters soil storage.
 
 **Winter carry-forward.**
 
-- A negative `NetET_intermediate` is stored as soil water. Storage is capped at
+- A negative `NetET_vol_intermediate` is stored as soil water. Storage is capped at
   AWC × 1.5 m × acres, and anything above the cap is overflow.
 - Later positive months draw the storage down.
 - Storage resets every January and at a missing month.
 
 ```
-NetET_final = max(NetET_intermediate − storage used, 0)
+NetET_final = max(NetET_vol_intermediate − storage used, 0)
 AR_final    = NetET_final / irr_eff
 ```
 
@@ -113,5 +113,10 @@ AR_final    = NetET_final / irr_eff
 
 The summaries count irrigated field-years only: IrrMapper `%_IRRIGATED` > 0.5. Every
 volume of an included field-year counts, including its GW subsidy and carry-forward.
-County summaries cover Nevada fields. Column rules are in
-[DATA_DICTIONARY.md](DATA_DICTIONARY.md).
+
+- **HA summaries, two files each.** One with every field in the HA, including the
+  out-of-state fields of HAs that cross the state line. One with Nevada fields only
+  (`_NV_fields_only`).
+- **County summaries.** Nevada fields only.
+
+Column rules are in [DATA_DICTIONARY.md](DATA_DICTIONARY.md).
