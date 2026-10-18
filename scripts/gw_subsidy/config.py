@@ -1,5 +1,9 @@
 """Central configuration: paths, physical constants, and model defaults.
 
+NWI T1: paths come from config/nwi_t1_final.yaml (inputs.fields_gpkg, inputs.dtw_tif,
+inputs.dtw_sigma_tif, inputs.tan_params_csv) and outputs go to the run's 04_gw_subsidy folder.
+Field IDs are the 2026-08-20 NWI_IDs, which equal the OPENET_IDs used throughout this package.
+
 All other modules import from here so a run is reproducible without hand-editing
 code between stages. Paths are derived from this file's location so the package
 works regardless of the current working directory.
@@ -7,40 +11,35 @@ works regardless of the current working directory.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
+# NWI T1: paths from the run configuration
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "utils"))
+from nwi_config import load_config, RunPaths  # noqa: E402
+
+RUN_CFG = load_config()
+RUN_PATHS = RunPaths(RUN_CFG).make()
+
 # --- Paths -------------------------------------------------------------------
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = REPO_ROOT / "Data"
-INPUT_DIR = DATA_DIR / "Inputs"
-OUTPUT_DIR = DATA_DIR / "Outputs"
-FIG_DIR = OUTPUT_DIR / "figures"
+OUTPUT_DIR = RUN_PATHS.subsidy
+INPUT_DIR = OUTPUT_DIR
 
 # Inputs
-FIELDS_GPKG = INPUT_DIR / "Nevada_agricultural_field_boundaries_20260526.gpkg"
-WTD_TIF = INPUT_DIR / "wtd_nevada.tif"
-GW_CSV = INPUT_DIR / "field_summaries_EToF_final_GW.csv"
-SW_CSV = INPUT_DIR / "field_summaries_EToF_final_SW.csv"
-BASINS_GEOJSON = INPUT_DIR / "Basins_State_Engineer_Admin_Boundaries.geojson"
-WELL_MEASURES_CSV = INPUT_DIR / "Groundwater_Monitoring_Measures.csv"
-WELL_SITES_DIR = INPUT_DIR / "Groundwater_Monitoring_Sites"
-TAN_PARAMS_CSV = INPUT_DIR / "tan2025_params.csv"
+FIELDS_GPKG = Path(RUN_CFG["inputs"]["fields_gpkg"])
+WTD_TIF = Path(RUN_CFG["inputs"]["dtw_tif"])
+WTD_SIGMA_TIF = Path(RUN_CFG["inputs"]["dtw_sigma_tif"])   # NWI T1: DTW uncertainty, reported per field
+ENSEMBLE_DIR = Path(RUN_CFG["inputs"]["ensemble_dir"])      # NWI T1: source of the growing-season ETo
+TAN_PARAMS_CSV = Path(RUN_CFG["inputs"]["tan_params_csv"])
 
 # Cached intermediates / outputs
-FIELD_TEXTURE_CSV = INPUT_DIR / "field_texture.csv"          # cached POLARIS sampling
+FIELD_TEXTURE_CSV = OUTPUT_DIR / "field_texture.csv"          # cached POLARIS sampling
 FIELD_WTD_PARQUET = OUTPUT_DIR / "field_wtd.parquet"          # cached zonal WTD (summary)
 FIELD_WTD_PIXELS_PARQUET = OUTPUT_DIR / "field_wtd_pixels.parquet"  # shallow-field WTD pixels
 FIELD_PARAMS_PARQUET = OUTPUT_DIR / "field_params.parquet"
-FIELD_YEAR_CSV = OUTPUT_DIR / "field_year_subsidy.csv"
-FIELD_MONTH_PARQUET = OUTPUT_DIR / "field_month_subsidy.parquet"
-FIELD_SUBSIDY_GPKG = OUTPUT_DIR / "field_subsidy.gpkg"
-BASIN_YEAR_CSV = OUTPUT_DIR / "basin_year_subsidy.csv"
-BASIN_SUMMARY_CSV = OUTPUT_DIR / "basin_summary.csv"
-WTD_VALIDATION_NDWR_CSV = OUTPUT_DIR / "wtd_validation_ndwr.csv"  # NDWR monitoring-well validation
-WTD_VALIDATION_NWIS_CSV = OUTPUT_DIR / "wtd_validation_nwis.csv"  # NWIS field-measurement validation
 
 # --- Earth Engine ------------------------------------------------------------
-GEE_PROJECT = "nwi-usgs"
+GEE_PROJECT = RUN_CFG["earth_engine"]["project"]   # NWI T1: nasa-water
 POLARIS_BASE = "projects/sat-io/open-datasets/polaris"
 # POLARIS depth bands (cm) and the weights used to build a root-zone-mean texture.
 POLARIS_DEPTHS = ["0_5", "5_15", "15_30", "30_60", "60_100"]
@@ -68,7 +67,7 @@ MODELS = ["tan", "banta", "averianov", "shah"]
 PRIMARY_MODEL = "tan"
 
 # --- Aggregation / selection -------------------------------------------------
-GROWING_SEASON_MONTHS = list(range(4, 11))  # Apr-Oct
+GROWING_SEASON_MONTHS = RUN_CFG["gw_subsidy"]["growing_season_months"]  # Apr-Oct
 SHALLOW_AREA_FRAC = 0.25     # basin is "shallow" if >= this frac of irrigated acres has WTD < d_ext
 
 # Well-anchored WTD bias correction (wtd_correction.py): off by default. The monitoring-well
@@ -77,7 +76,8 @@ SHALLOW_AREA_FRAC = 0.25     # basin is "shallow" if >= this frac of irrigated a
 # basins -- where the continental-scale ML WTD product under-resolves the deep drawdown cone and
 # reads too shallow -- are excluded.
 APPLY_WTD_CORRECTION = False
-SW_USE_MIN_ACRE_FRAC = 0.10  # keep basins with >= this fraction of irrigated acres SW or mixed
+SW_FILTER = RUN_CFG["gw_subsidy"]["sw_filter"]              # NWI T1: basin SW-use test on/off
+SW_USE_MIN_ACRE_FRAC = RUN_CFG["gw_subsidy"]["sw_use_min_acre_frac"]  # keep basins with >= this fraction of irrigated acres SW or mixed
 WTD_BIAS_SENSITIVITY_M = [-1.0, -0.5, 0.5, 1.0]  # +/- offsets for sensitivity reporting
 
 # Rooting-depth assignment (cm) for the Tan Table 3 vegetated parameters, keyed by

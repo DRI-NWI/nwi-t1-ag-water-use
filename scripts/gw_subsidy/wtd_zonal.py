@@ -9,8 +9,12 @@ can later be averaged per pixel (avoiding the Jensen bias of f(mean WTD)). Deep 
 are pruned -- their groundwater fraction is identically zero for any soil texture.
 
 Outputs:
-  Data/Outputs/field_wtd.parquet          one row per field: summary stats
-  Data/Outputs/field_wtd_pixels.parquet   long: (OPENET_ID, wtd_m, weight) for shallow fields
+  field_wtd.parquet          one row per field: summary stats
+  field_wtd_pixels.parquet   long: (OPENET_ID, wtd_m, weight) for shallow fields
+
+NWI T1 edits: the pixel area comes from the raster (the original hardcoded the 24 m Ma et al.
+pixel; it only affects valid_frac); fields are read by NWI_ID (= OPENET_ID in the 2026-08-20
+layer); field_sigma() adds the mean DTW uncertainty per field.
 """
 
 from __future__ import annotations
@@ -21,16 +25,17 @@ import pandas as pd
 from . import config
 
 KEEP_DEPTH_M = 16.0   # store pixels for fields with min WTD < this (max veg d_ext ~ 15 m)
-PIXEL_AREA_M2 = 24.140766313896204 ** 2
+PIXEL_AREA_M2 = None   # NWI T1: set from the raster resolution in run()
 CHUNK = 1500
 
 
 def _load_fields_in_raster_crs():
+    """Field polygons (one per OPENET_ID) in the raster CRS, with their area in m2."""
     import geopandas as gpd
     import rasterio
     with rasterio.open(config.WTD_TIF) as ds:
         rcrs = ds.crs
-    gdf = gpd.read_file(config.FIELDS_GPKG, columns=["OPENET_ID"])
+    gdf = gpd.read_file(config.FIELDS_GPKG, columns=["NWI_ID"]).rename(columns={"NWI_ID": "OPENET_ID"})  # NWI T1
     gdf = gdf[gdf["OPENET_ID"].notna()].copy()
     # Dissolve multi-polygon fields (same OPENET_ID) into one geometry.
     gdf = gdf.dissolve(by="OPENET_ID", as_index=False)
@@ -44,7 +49,11 @@ def run(force=False):
         return pd.read_parquet(config.FIELD_WTD_PARQUET)
 
     from exactextract import exact_extract
+    import rasterio
 
+    global PIXEL_AREA_M2
+    with rasterio.open(config.WTD_TIF) as ds:   # NWI T1: pixel area of the DTW raster in use
+        PIXEL_AREA_M2 = abs(ds.res[0] * ds.res[1])
     gdf = _load_fields_in_raster_crs()
     n = len(gdf)
     print(f"[wtd] {n} dissolved fields; extracting in chunks of {CHUNK}")
@@ -101,6 +110,31 @@ def run(force=False):
     print(f"[wtd] wrote {len(summary)} field summaries, {len(pixels):,} shallow-field pixels "
           f"({summary['wtd_mean_m'].notna().sum()} with valid WTD)")
     return summary
+
+
+def field_sigma(force=False):
+    """
+    NWI T1: mean DTW uncertainty (sigma, m) over each field, for reporting only.
+
+    Parameters
+    ----------
+    force : bool
+        Recompute even if the output exists.
+
+    Returns
+    -------
+    pd.DataFrame
+        OPENET_ID, dtw_sigma_mean_m. Also written to field_dtw_sigma.parquet.
+    """
+    out = config.OUTPUT_DIR / "field_dtw_sigma.parquet"
+    if out.exists() and not force:
+        return pd.read_parquet(out)
+    from exactextract import exact_extract
+    gdf = _load_fields_in_raster_crs()
+    res = exact_extract(str(config.WTD_SIGMA_TIF), gdf, ["mean"], include_cols=["OPENET_ID"], output="pandas")
+    sigma = res.rename(columns={"mean": "dtw_sigma_mean_m"})[["OPENET_ID", "dtw_sigma_mean_m"]]
+    sigma.to_parquet(out, index=False)
+    return sigma
 
 
 def _centroid_fallback(summary, gdf, miss_ids):

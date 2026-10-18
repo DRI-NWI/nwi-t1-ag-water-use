@@ -11,6 +11,5 @@ in the code, so `git diff <this commit> -- scripts/` shows each edit.
 | `phase1_data_preparation/aggregate_field_prism_monthly.py` | `mixed-field-allocation/artifacts/model_defensibility_review_20260925/O_prism800_field_spi/01_aggregate_monthly.py` | file dated 2026-10-04 |
 | `utils/allocation_utils.py` | `agricultural-water-forecasting/scripts/utils/allocation_utils.py` | commit 58819af |
 | `otter/run_nv_otter_prism_monthly.py` | `Documents/projects/etdemands/nwi/Prz_Comparison/analysis/run_nv_otter_matched_continuous_monthly.py` | file dated 2026-10-01 |
-| `otter/run_nv_otter_matched_continuous.py` | `Documents/projects/etdemands/nwi/Prz_Comparison/analysis/run_nv_otter_matched_continuous.py` (source of `load_static`, `load_etof`) | file dated 2026-09-24 |
 | `otter/water_balance.py` | `otter/src/otter/water_balance.py` | commit 8338226 |
-| `gw_subsidy/*.py` | `nwi-gw-subsidy/src/gw_subsidy/` | commit 7262f69 |
+| `gw_subsidy/*.py` | `nwi-gw-subsidy/src/gw_subsidy/` and `nwi-gw-subsidy/main.py` | commit 7262f69 |

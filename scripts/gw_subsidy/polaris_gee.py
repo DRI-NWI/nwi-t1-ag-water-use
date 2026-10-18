@@ -8,6 +8,9 @@ POLARIS layers live on GEE (projects/sat-io/open-datasets/polaris/{sand,silt,cla
 each an ImageCollection of 6 depth bands (system:index e.g. 'sand_0_5'). Only the
 field IDs passed in are sampled, so the fast-track samples just the shallow-basin fields.
 A local-COG fallback is documented in the README for headless environments.
+
+NWI T1: fields are read by NWI_ID (= OPENET_ID in the 2026-08-20 layer); the Earth Engine
+project is nasa-water (config.GEE_PROJECT).
 """
 
 from __future__ import annotations
@@ -42,8 +45,7 @@ def _soil_image(ee):
 def _fields_4326(field_ids):
     import geopandas as gpd
     import shapely
-    cols = ["OPENET_ID"]
-    gdf = gpd.read_file(config.FIELDS_GPKG, columns=cols)
+    gdf = gpd.read_file(config.FIELDS_GPKG, columns=["NWI_ID"]).rename(columns={"NWI_ID": "OPENET_ID"})  # NWI T1
     gdf = gdf[gdf["OPENET_ID"].notna()]
     if field_ids is not None:
         gdf = gdf[gdf["OPENET_ID"].isin(set(field_ids))]
