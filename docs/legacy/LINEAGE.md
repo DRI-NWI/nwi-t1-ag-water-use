@@ -19,7 +19,7 @@ code with the settings of the 2026-08-23 field and HA package:
 
 It matches every HA × year × month cell of the delivered GW and SW HA summaries (ETa,
 NetET, AR, acres) to within 1e-11 acre-ft. Row counts are identical (GW 8,203,116; SW
-9,237,300). `scripts/07_bridge_qa.py` checks this and writes `07_qa/reproduction_check.csv`.
+9,237,300). `scripts/qa/bridge_qa.py` checks this and writes `07_qa/reproduction_check.csv`.
 
 ## Bridge to the current run
 

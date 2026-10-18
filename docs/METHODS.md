@@ -27,7 +27,7 @@ All settings are in `config/nwi_t1_final.yaml`. The steps in `scripts/` run in o
 - Longer gaps are filled from the field's EToF climatology for that calendar month. There
   are seven climatology windows covering 1985–2025: 1985–91, 1992–97, 1998–2003, 2004–09,
   2010–15, 2016–21 and 2022–25. Each climatology is the field's mean observed EToF, clipped
-  to 0–1.5 (`01b_etof_climatology.py`).
+  to 0–1.5 (`scripts/phase1_data_preparation/calculate_field_climatologies.py`).
 - 1,194 field-months have no observed EToF in their window and stay missing.
 - ETa volume = EToF × ETo × acres.
 

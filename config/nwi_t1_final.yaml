@@ -35,7 +35,7 @@ inputs:
   # POLARIS texture table keyed by 2026-05-06 OPENET_ID (texture check only).
   field_texture_csv: /Users/Peter.ReVelle@dri.edu/Documents/projects/NWI/dtw/nv_dtw_parity_statewide_100m/epsg5070/gw_subsidy_parity_vs_ma/inputs/field_texture.csv
   tan_params_csv: /Users/Peter.ReVelle@dri.edu/github/nwi-gw-subsidy/Data/Inputs/tan2025_params.csv
-  # 2026-08-23 package (reproduction check, scripts/07_bridge_qa.py).
+  # 2026-08-23 package (reproduction check, scripts/qa/bridge_qa.py).
   reference_package_dir: /Users/Peter.ReVelle@dri.edu/Documents/projects/NWI/Will_documentation/2026-08-23
 
 earth_engine:
