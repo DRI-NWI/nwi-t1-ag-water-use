@@ -1,439 +1,71 @@
-#!/usr/bin/env python3
 """
-Aggregate basin climate data and calculate SPI for Nevada basin training.
+Calculate basin SPI from PRISM monthly precipitation over the full period.
 
-This script:
-1. Loads field-level monthly GridMET summaries (1979-1984) when available
-2. Falls back to existing basin-level HA summaries when early GridMET exports are unavailable
-3. Merges any early GridMET data with basin HA summaries
-4. Calculates SPI for all configured timescales using the full available period
-5. Outputs drought indices to the config-managed Phase 2 input path
+For each precipitation series (one per hydrographic area, and one per surface-water
+contributing area where defined), SPI is computed with climate_indices: gamma
+distribution, monthly periodicity, and one calibration window applied to every year.
+The September SPI-12 of each basin-year drives the dynamic SW/GW split of mixed fields
+in process_field_summaries.py.
 
-CONFIGURATION:
-All paths and parameters loaded from config/workflow_config.yaml
+Source per basin: the contributing-area series where one exists, otherwise the HA series.
+
+NWI T1: copied from agricultural-water-forecasting
+scripts/phase1_data_preparation/extend_basin_climate_spi_1979_2023.py. The original stitched
+1979-1984 gridMET onto 1985+ HA summaries before computing SPI; here each PRISM series
+already covers 1981-2025, so the extension and merge functions are removed and only the
+SPI calculation (calculate_basin_spi_extended) is kept.
+
+Inputs (config/nwi_t1_final.yaml):
+    inputs.prism_region_ppt   PRISM monthly PPT per HA and contributing area (HA, region_type,
+                              name, YEAR, MONTH, PPT_MM)
+    spi.calibration_start / calibration_end, spi.timescale_months, spi.reference_month
+
+Outputs (run/03_spi/):
+    prism_spi_monthly_by_region.csv   SPI for every series, month and timescale
+    basin_spi_prism.csv               one series per basin (contributing area, else HA),
+                                      the drought-indices table read by the field processor
 
 Author: Peter ReVelle
-Date: November 20, 2025
-Updated: September 16, 2026 - Nevada/NDWR production configuration
+Updated: October 2026 - NWI T1 full-period PRISM SPI
 """
 
 import os
 import sys
-import pandas as pd
-import numpy as np
-from pathlib import Path
 import logging
+import warnings
+from pathlib import Path
 
-# Add project root to path for config import
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
+import numpy as np
+import pandas as pd
 
-# Import unified configuration
-from config import load_config
+# NWI T1: settings from the run configuration
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "utils"))
+from nwi_config import load_config, RunPaths  # noqa: E402
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO, 
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+# climate_indices logs every call; keep only this script's messages
+logging.getLogger('climate_indices').setLevel(logging.ERROR)
+try:
+    import structlog
+    structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(logging.ERROR))
+except ImportError:
+    pass
 
-# ============================================================================
-# CONFIGURATION FROM UNIFIED CONFIG FILE
-# ============================================================================
+CFG = load_config()
+PATHS = RunPaths(CFG).make()
+SPI_CALIBRATION_START = CFG['spi']['calibration_start']
+SPI_CALIBRATION_END = CFG['spi']['calibration_end']
+SPI_TIMESCALES = [3, 6, 12, 24, 36, 48, 60]
 
-def get_script_config():
-    """Load configuration for this script."""
-    cfg = load_config()
-    
-    # For compatibility, use SW summaries (climate is shared across SW/GW)
-    ha_summaries_file = cfg.paths.ha_summaries_sw
-    
-    return {
-        'gridmet_dir': Path(cfg.paths.gridmet_dir),
-        'ha_summaries_file': Path(ha_summaries_file),
-        'output_dir': Path(cfg.paths.drought_data_dir),
-        'drought_indices_file': Path(cfg.paths.drought_indices_file),
-        'spi_timescales': cfg.phase2.mixed_effects.spi_timescales,
-        'historical_start_year': cfg.phase1.climate_extension.historical_start_year,
-        'historical_end_year': cfg.phase1.climate_extension.historical_end_year,
-        'spi_calibration_start_year': cfg.phase1.climate_extension.spi_calibration_start_year,
-        'spi_calibration_end_year': cfg.phase1.climate_extension.spi_calibration_end_year,
-    }
-
-# Load config at module level
-config = get_script_config()
-
-GRIDMET_DIR = config['gridmet_dir']
-HA_SUMMARIES_FILE = config['ha_summaries_file']
-OUTPUT_DIR = config['output_dir']
-DROUGHT_INDICES_FILE = config['drought_indices_file']
-SPI_TIMESCALES = config['spi_timescales']
-SPI_CALIBRATION_START = config['spi_calibration_start_year']
-SPI_CALIBRATION_END = config['spi_calibration_end_year']
-
-# Ensure output directory exists
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-# Field to basin mapping (global variable)
-FIELD_TO_BASIN_MAP = None
-
-
-# ============================================================================
-# FIELD-TO-BASIN MAPPING
-# ============================================================================
-
-def load_field_to_basin_mapping(ha_summaries_file=None):
-    """
-    Load mapping from OPENET_ID to basin (HA_NAME_CODE).
-    
-    If HA summaries file is provided, extracts mapping from there.
-    Otherwise, will use HYD_AREA_N from GridMET files.
-    
-    Parameters
-    ----------
-    ha_summaries_file : Path, optional
-        Path to HA summaries CSV containing OPENET_ID and HA_NAME_CODE
-    
-    Returns
-    -------
-    dict : Mapping from OPENET_ID to HA_NAME_CODE (basin code)
-    """
-    global FIELD_TO_BASIN_MAP
-    
-    if ha_summaries_file and os.path.exists(ha_summaries_file):
-        logger.info(f"Loading field-to-basin mapping from {ha_summaries_file}")
-        
-        try:
-            # Load only needed columns to save memory
-            ha_df = pd.read_csv(
-                ha_summaries_file, 
-                usecols=['OPENET_ID', 'HA_NAME_CODE'],
-                low_memory=False
-            )
-            
-            # Create mapping (OPENET_ID -> HA_NAME_CODE)
-            FIELD_TO_BASIN_MAP = dict(
-                zip(ha_df['OPENET_ID'], ha_df['HA_NAME_CODE'])
-            )
-            
-            logger.info(f"✓ Loaded {len(FIELD_TO_BASIN_MAP)} field-to-basin mappings")
-            logger.info(f"  Unique basins: {len(set(FIELD_TO_BASIN_MAP.values()))}")
-            
-            # Show sample mappings
-            sample_items = list(FIELD_TO_BASIN_MAP.items())[:3]
-            logger.info(f"  Sample mappings: {sample_items}")
-            
-        except ValueError as e:
-            logger.info(f"No OPENET_ID mapping available in HA summaries: {e}")
-            logger.info("Proceeding without field-to-basin mapping (basin summaries already available)")
-            FIELD_TO_BASIN_MAP = None
-        except Exception as e:
-            logger.error(f"Error loading mapping: {e}")
-            FIELD_TO_BASIN_MAP = None
-    
-    else:
-        logger.warning("No HA summaries file provided - will use HYD_AREA_N as basin identifier")
-        FIELD_TO_BASIN_MAP = None
-    
-    return FIELD_TO_BASIN_MAP
-
-
-# ============================================================================
-# FIELD-TO-BASIN AGGREGATION
-# ============================================================================
-
-def aggregate_field_to_basin_monthly(field_df, basin_col='HYD_AREA_N'):
-    """
-    Aggregate field-level data to basin-level monthly precipitation.
-    Assumes field_df has ACRES_FTR_GEOM, YEAR, MONTH, PPT_MM (or ppt_mm),
-    and either HYD_AREA_N or OPENET_ID + FIELD_TO_BASIN_MAP.
-    """
-
-    # If field-to-basin mapping exists, apply it (from HA summaries)
-    if FIELD_TO_BASIN_MAP:
-        field_df['HA_NAME_CODE'] = field_df['OPENET_ID'].map(FIELD_TO_BASIN_MAP)
-        basin_col = 'HA_NAME_CODE'
-        logger.info("Applied field-to-basin mapping using HA_NAME_CODE")
-
-    # Remove fields with no basin assignment
-    if basin_col not in field_df.columns:
-        logger.error(f"{basin_col} column not found in field_df")
-        return pd.DataFrame()
-
-    valid_df = field_df[field_df[basin_col].notna()].copy()
-
-    if len(valid_df) == 0:
-        logger.error("No valid basin assignments found!")
-        return pd.DataFrame()
-
-    # Normalize column names: only care about precipitation
-    col_mapping = {}
-    for col in valid_df.columns:
-        col_lower = col.lower()
-        if col_lower == 'ppt_mm':
-            col_mapping[col] = 'PPT_MM'
-
-    valid_df = valid_df.rename(columns=col_mapping)
-
-    if 'PPT_MM' not in valid_df.columns:
-        logger.error("PPT_MM (or ppt_mm) column not found after renaming.")
-        return pd.DataFrame()
-
-    # Handle -999 (or other negative sentinels) as NaN, keep rows
-    n_sentinel = (valid_df['PPT_MM'] < 0).sum()
-    if n_sentinel > 0:
-        logger.info(f"  Found {n_sentinel} sentinel values in PPT_MM - setting to NaN")
-        valid_df.loc[valid_df['PPT_MM'] < 0, 'PPT_MM'] = np.nan
-
-    logger.info(f"  Aggregating {len(valid_df)} field records to basin level")
-    logger.info(f"    Unique fields: {valid_df['OPENET_ID'].nunique()}")
-    logger.info(f"    Unique basins: {valid_df[basin_col].nunique()}")
-
-    # Area-weighted precipitation
-    valid_df['PPT_MM_weighted'] = valid_df['PPT_MM'] * valid_df['ACRES_FTR_GEOM']
-    valid_df['PPT_area'] = valid_df['PPT_MM'].notna() * valid_df['ACRES_FTR_GEOM']
-
-    basin_monthly = (
-        valid_df
-        .groupby([basin_col, 'YEAR', 'MONTH'])
-        .agg({
-            'PPT_MM_weighted': 'sum',
-            'PPT_area': 'sum',
-            'ACRES_FTR_GEOM': 'sum',   # total basin area this month
-            'OPENET_ID': 'count'       # number of fields contributing
-        })
-        .reset_index()
-    )
-
-    # Area-weighted mean PPT
-    basin_monthly['PPT_MM'] = basin_monthly['PPT_MM_weighted'] / basin_monthly['PPT_area']
-
-    # Rename and select output columns
-    basin_monthly.rename(columns={basin_col: 'HA_NAME_CODE',
-                                  'OPENET_ID': 'N_FIELDS'}, inplace=True)
-
-    basin_monthly = basin_monthly[[
-        'HA_NAME_CODE', 'YEAR', 'MONTH',
-        'PPT_MM',
-        'ACRES_FTR_GEOM', 'N_FIELDS'
-    ]]
-
-    # Log missing precipitation at basin-month level
-    n_missing = basin_monthly['PPT_MM'].isna().sum()
-    if n_missing > 0:
-        logger.warning(f"  PPT_MM: {n_missing}/{len(basin_monthly)} basin-months with all fields missing")
-
-    logger.info(f"  ✓ Aggregated to {len(basin_monthly)} basin-month records")
-
-    return basin_monthly
-
-
-# ============================================================================
-# DATA LOADING
-# ============================================================================
-
-def load_and_aggregate_gridmet_years(gridmet_dir, year_start=1979, year_end=1984):
-    """
-    Load all GridMET field summaries and aggregate to basin level.
-    
-    Parameters
-    ----------
-    gridmet_dir : Path
-        Directory containing fb_gridmet_monthly_summaries_YYYY_YYYY.csv files
-    year_start : int
-        First year to process
-    year_end : int
-        Last year to process
-    
-    Returns
-    -------
-    pd.DataFrame : Combined basin-level monthly data for all years
-    """
-    
-    logger.info(f"\nLoading GridMET data for {year_start}-{year_end}...")
-    
-    all_data = []
-    
-    for year in range(year_start, year_end + 1):
-        filename = f"fb_gridmet_monthly_summaries_{year}_{year}.csv"
-        filepath = gridmet_dir / filename
-        
-        if not filepath.exists():
-            logger.warning(f"  File not found: {filename}")
-            continue
-        
-        logger.info(f"  Loading {filename}...")
-        
-        try:
-            # Load field-level data
-            field_data = pd.read_csv(filepath, low_memory=False)
-            
-            logger.info(f"    {len(field_data)} field records")
-
-            basin_level_required = {'HYD_AREA', 'YEAR', 'MONTH', 'PPT_MM', 'ACRES_FTR_GEOM'}
-            if basin_level_required.issubset(field_data.columns):
-                basin_data = field_data.copy()
-                basin_name_col = 'HYD_AREA_N' if 'HYD_AREA_N' in basin_data.columns else 'HYD_AREA'
-                basin_data['HA_NAME_CODE'] = basin_data[basin_name_col]
-                if 'N_FIELDS' not in basin_data.columns:
-                    basin_data['N_FIELDS'] = np.nan
-                basin_data = basin_data[
-                    ['HA_NAME_CODE', 'YEAR', 'MONTH', 'PPT_MM', 'ACRES_FTR_GEOM', 'N_FIELDS']
-                ].copy()
-                basin_data = (
-                    basin_data
-                    .sort_values(['HA_NAME_CODE', 'YEAR', 'MONTH'])
-                    .drop_duplicates(subset=['HA_NAME_CODE', 'YEAR', 'MONTH'], keep='last')
-                    .reset_index(drop=True)
-                )
-                logger.info("    Detected pre-aggregated basin GridMET export; using PPT_MM directly")
-            else:
-                # Aggregate to basin level
-                basin_data = aggregate_field_to_basin_monthly(field_data)
-            
-            if not basin_data.empty:
-                all_data.append(basin_data)
-            
-        except Exception as e:
-            logger.error(f"  Error processing {filename}: {e}")
-            import traceback
-            logger.debug(traceback.format_exc())
-            continue
-    
-    if not all_data:
-        logger.error("No data loaded!")
-        return pd.DataFrame()
-    
-    # Combine all years
-    combined = pd.concat(all_data, ignore_index=True)
-    combined = combined.sort_values(['HA_NAME_CODE', 'YEAR', 'MONTH'])
-    
-    logger.info(f"\n✓ Combined GridMET data:")
-    logger.info(f"  {len(combined)} records")
-    logger.info(f"  {combined['HA_NAME_CODE'].nunique()} basins")
-    logger.info(f"  Date range: {combined['YEAR'].min()}-{combined['YEAR'].max()}")
-    
-    return combined
-
-
-def load_and_aggregate_ha_summaries(ha_summaries_file, year_start=1985):
-    """
-    Load existing HA summaries (1985+) and aggregate to basin-monthly format.
-    
-    Parameters
-    ----------
-    ha_summaries_file : Path
-        Path to all_gw_fieldsha_summaries_EToF_final.csv
-    year_start : int
-        First year to include (default: 1985)
-    
-    Returns
-    -------
-    pd.DataFrame : Basin-level monthly data from HA summaries
-    """
-    
-    logger.info(f"\nLoading HA summaries from {ha_summaries_file}...")
-    
-    if not os.path.exists(ha_summaries_file):
-        logger.error(f"HA summaries file not found: {ha_summaries_file}")
-        return pd.DataFrame()
-    
-    try:
-        # Load HA summaries
-        ha_df = pd.read_csv(ha_summaries_file, low_memory=False)
-        
-        logger.info(f"  Loaded {len(ha_df)} records")
-        
-        # Filter to year_start and later
-        ha_df = ha_df[ha_df['YEAR'] >= year_start].copy()
-        
-        logger.info(f"  Filtered to {year_start}+: {len(ha_df)} records")
-        
-        basin_level_required = {'HA_NAME_CODE', 'YEAR', 'MONTH', 'PPT_MM', 'ACRES_FTR_GEOM'}
-        if basin_level_required.issubset(ha_df.columns):
-            basin_monthly = ha_df.copy()
-            if 'N_FIELDS' not in basin_monthly.columns:
-                if 'field_count' in basin_monthly.columns:
-                    basin_monthly['N_FIELDS'] = basin_monthly['field_count']
-                elif 'num_fields_irrigated' in basin_monthly.columns:
-                    basin_monthly['N_FIELDS'] = basin_monthly['num_fields_irrigated']
-                else:
-                    basin_monthly['N_FIELDS'] = np.nan
-
-            basin_monthly = basin_monthly[
-                ['HA_NAME_CODE', 'YEAR', 'MONTH', 'PPT_MM', 'ACRES_FTR_GEOM', 'N_FIELDS']
-            ].copy()
-            basin_monthly = (
-                basin_monthly
-                .sort_values(['HA_NAME_CODE', 'YEAR', 'MONTH'])
-                .drop_duplicates(subset=['HA_NAME_CODE', 'YEAR', 'MONTH'], keep='last')
-                .reset_index(drop=True)
-            )
-            logger.info("  Detected pre-aggregated basin HA summaries; using PPT_MM directly")
-        else:
-            basin_monthly = aggregate_field_to_basin_monthly(ha_df)
-        
-        logger.info(f"\n✓ HA summaries aggregated:")
-        logger.info(f"  {len(basin_monthly)} records")
-        logger.info(f"  {basin_monthly['HA_NAME_CODE'].nunique()} basins")
-        logger.info(f"  Date range: {basin_monthly['YEAR'].min()}-{basin_monthly['YEAR'].max()}")
-        
-        return basin_monthly
-        
-    except Exception as e:
-        logger.error(f"Error loading HA summaries: {e}")
-        import traceback
-        logger.debug(traceback.format_exc())
-        return pd.DataFrame()
-
-
-def merge_gridmet_and_ha_summaries(gridmet_data, ha_data):
-    """Debug version - show what's happening"""
-    
-    logger.info("\n=== MERGE DEBUG ===")
-    
-    # Check basin overlap
-    gridmet_basins = set(gridmet_data['HA_NAME_CODE'].unique())
-    ha_basins = set(ha_data['HA_NAME_CODE'].unique())
-    
-    common_basins = gridmet_basins.intersection(ha_basins)
-    gridmet_only = gridmet_basins - ha_basins
-    ha_only = ha_basins - gridmet_basins
-    
-    logger.info(f"GridMET basins: {len(gridmet_basins)}")
-    logger.info(f"HA basins: {len(ha_basins)}")
-    logger.info(f"Common basins: {len(common_basins)}")
-    logger.info(f"GridMET only: {len(gridmet_only)} - {list(gridmet_only)[:5]}")
-    logger.info(f"HA only: {len(ha_only)} - {list(ha_only)[:5]}")
-    
-    # Combine
-    combined = pd.concat([gridmet_data, ha_data], ignore_index=True)
-    combined = combined.sort_values(['HA_NAME_CODE', 'YEAR', 'MONTH'])
-    
-    # Check Amargosa Desert specifically
-    test_basin = 'Carson Desert (101)'
-    
-    gridmet_test = gridmet_data[gridmet_data['HA_NAME_CODE'] == test_basin]
-    ha_test = ha_data[ha_data['HA_NAME_CODE'] == test_basin]
-    combined_test = combined[combined['HA_NAME_CODE'] == test_basin]
-    
-    logger.info(f"\n{test_basin} debug:")
-    logger.info(f"  GridMET: {len(gridmet_test)} records, years {gridmet_test['YEAR'].min()}-{gridmet_test['YEAR'].max() if len(gridmet_test) > 0 else 'N/A'}")
-    logger.info(f"  HA: {len(ha_test)} records, years {ha_test['YEAR'].min()}-{ha_test['YEAR'].max()}")
-    logger.info(f"  Combined: {len(combined_test)} records, years {combined_test['YEAR'].min()}-{combined_test['YEAR'].max()}")
-    
-    return combined
-
-
-# ============================================================================
-# SPI CALCULATION
-# ============================================================================
 
 def calculate_basin_spi_extended(basin_climate_df, output_file, timescales=[3, 6, 12, 24, 36, 48, 60],
                                   calibration_start=None, calibration_end=None):
     """
-    Calculate SPI for extended time period (1979-2023).
+    Calculate SPI for every basin over its full monthly record.
+
+    NWI T1: each series is the full PRISM record (1981-2025) in one piece, so no extension
+    or merging happens before this call.
     
     Uses climate_indices package to calculate SPI for each basin and timescale.
     Gamma distribution is calibrated on the specified calibration period
@@ -443,7 +75,7 @@ def calculate_basin_spi_extended(basin_climate_df, output_file, timescales=[3, 6
     Parameters
     ----------
     basin_climate_df : pd.DataFrame
-        Basin-level monthly climate data
+        Basin-level monthly climate data with columns HA_NAME_CODE, YEAR, MONTH, PPT_MM
     output_file : Path
         Output CSV path for results
     timescales : list of int
@@ -621,196 +253,101 @@ def calculate_basin_spi_extended(basin_climate_df, output_file, timescales=[3, 6
 
 
 # ============================================================================
+# NWI T1: PRISM INPUT AND SOURCE SELECTION
+# ============================================================================
+
+def load_prism_region_ppt(region_ppt_file, region_type):
+    """
+    Load PRISM monthly precipitation for one kind of region.
+
+    Parameters
+    ----------
+    region_ppt_file : str or Path
+        CSV with HA, region_type, name, YEAR, MONTH, PPT_MM.
+    region_type : str
+        'ha_only' (precipitation over the HA) or 'contributing_area' (over the HA's
+        surface-water contributing area).
+
+    Returns
+    -------
+    pd.DataFrame
+        HA_NAME_CODE ('Name (code)'), HA, YEAR, MONTH, PPT_MM for that region type.
+    """
+    ppt = pd.read_csv(region_ppt_file, dtype={'HA': str})
+    ppt = ppt[ppt['region_type'] == region_type].copy()
+    ppt['HA_NAME_CODE'] = ppt['name'].astype(str) + ' (' + ppt['HA'] + ')'
+    return ppt[['HA_NAME_CODE', 'HA', 'YEAR', 'MONTH', 'PPT_MM']]
+
+
+def select_basin_spi_source(spi_ha, spi_contributing):
+    """
+    Pick one SPI series per basin: the contributing area where defined, else the HA.
+
+    Parameters
+    ----------
+    spi_ha : pd.DataFrame
+        SPI from HA precipitation (output of calculate_basin_spi_extended).
+    spi_contributing : pd.DataFrame
+        SPI from contributing-area precipitation.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per basin, year and month, with column spi_source
+        ('prism_contributing_area' or 'prism_ha').
+    """
+    spi_contributing = spi_contributing.assign(spi_source='prism_contributing_area')
+    spi_ha = spi_ha.assign(spi_source='prism_ha')
+    has_contributing = set(spi_contributing['HA'])
+    spi_ha = spi_ha[~spi_ha['HA'].isin(has_contributing)]
+    selected = pd.concat([spi_contributing, spi_ha], ignore_index=True)
+    return selected.sort_values(['HA_NAME_CODE', 'YEAR', 'MONTH']).reset_index(drop=True)
+
+
+# ============================================================================
 # MAIN WORKFLOW
 # ============================================================================
 
 def main():
     """
-    Main workflow: Load GridMET and HA data, aggregate to basins, calculate SPI.
+    Compute SPI for every PRISM series, then write the per-basin drought-indices table.
     """
-    
-    logger.info("="*80)
-    logger.info("EXTENDING BASIN CLIMATE DATA WITH GRIDMET 1979-1984")
-    logger.info("="*80)
-    logger.info(f"GridMET directory: {GRIDMET_DIR}")
-    logger.info(f"HA summaries file: {HA_SUMMARIES_FILE}")
-    logger.info(f"Output directory: {OUTPUT_DIR}")
-    logger.info(f"Configured drought file: {DROUGHT_INDICES_FILE}")
-    
-    # Step 1: Load field-to-basin mapping
-    logger.info("\n" + "="*80)
-    logger.info("STEP 1: LOADING FIELD-TO-BASIN MAPPING")
-    logger.info("="*80)
-    load_field_to_basin_mapping(HA_SUMMARIES_FILE)
-    
-    # Step 2: Load and aggregate GridMET data (1979-1984)
-    logger.info("\n" + "="*80)
-    logger.info("STEP 2: LOADING GRIDMET DATA (1979-1984)")
-    logger.info("="*80)
-    basin_monthly_gridmet = load_and_aggregate_gridmet_years(
-        GRIDMET_DIR, 
-        year_start=1979, 
-        year_end=1984
-    )
-    
-    if basin_monthly_gridmet.empty:
-        logger.warning("No early GridMET basin climate data found; continuing with HA summaries only")
-    else:
-        gridmet_file = OUTPUT_DIR / 'basin_monthly_climate_1979_1984_gridmet.csv'
-        basin_monthly_gridmet.to_csv(gridmet_file, index=False)
-        logger.info(f"\n✓ Saved GridMET aggregation: {gridmet_file}")
-    
-    # Step 3: Load and aggregate HA summaries (1985+)
-    logger.info("\n" + "="*80)
-    logger.info("STEP 3: LOADING HA SUMMARIES (1985+)")
-    logger.info("="*80)
-    basin_monthly_ha = load_and_aggregate_ha_summaries(
-        HA_SUMMARIES_FILE,
-        year_start=1985
-    )
-    
-    if basin_monthly_ha.empty:
-        if basin_monthly_gridmet.empty:
-            logger.error("No HA summaries data and no GridMET data available. Exiting.")
-            return
-        logger.warning("No HA summaries data - using GridMET only")
-        full_dataset = basin_monthly_gridmet
-    elif basin_monthly_gridmet.empty:
-        logger.info("Using HA summaries only for SPI generation")
-        full_dataset = basin_monthly_ha
-    else:
-        # Save intermediate HA result
-        ha_file = OUTPUT_DIR / 'basin_monthly_climate_1985_plus_ha.csv'
-        basin_monthly_ha.to_csv(ha_file, index=False)
-        logger.info(f"\n✓ Saved HA aggregation: {ha_file}")
-        
-        # Step 4: Merge datasets
-        logger.info("\n" + "="*80)
-        logger.info("STEP 4: MERGING GRIDMET AND HA SUMMARIES")
-        logger.info("="*80)
-        full_dataset = merge_gridmet_and_ha_summaries(
-            basin_monthly_gridmet, 
-            basin_monthly_ha
+    logger.info("=" * 80)
+    logger.info("BASIN SPI FROM PRISM PRECIPITATION (FULL PERIOD)")
+    logger.info("=" * 80)
+    region_ppt_file = CFG['inputs']['prism_region_ppt']
+    logger.info(f"PRISM regional precipitation: {region_ppt_file}")
+    logger.info(f"Calibration period: {SPI_CALIBRATION_START}-{SPI_CALIBRATION_END}")
+
+    results = {}
+    for region_type in ['ha_only', 'contributing_area']:
+        logger.info("\n" + "=" * 80)
+        logger.info(f"STEP: SPI FOR REGION TYPE '{region_type}'")
+        logger.info("=" * 80)
+        ppt = load_prism_region_ppt(region_ppt_file, region_type)
+        spi = calculate_basin_spi_extended(
+            ppt,
+            output_file=PATHS.spi / f'spi_{region_type}.csv',
+            timescales=SPI_TIMESCALES,
         )
-    
-    if full_dataset.empty:
-        logger.error("Failed to create combined dataset. Exiting.")
-        return
-    
-    # Save combined dataset
-    combined_file = OUTPUT_DIR / 'basin_monthly_climate_full_period_1979_2025.csv'
-    full_dataset.to_csv(combined_file, index=False)
-    logger.info(f"\n✓ Saved combined dataset: {combined_file}")
-    
-    # Step 5: Calculate SPI for full period
-    logger.info("\n" + "="*80)
-    logger.info("STEP 5: CALCULATING SPI FOR FULL PERIOD")
-    logger.info("="*80)
-    spi_results = calculate_basin_spi_extended(
-        full_dataset, 
-        DROUGHT_INDICES_FILE,
-        timescales=SPI_TIMESCALES
-    )
-    
-    if spi_results.empty:
-        logger.error("Failed to calculate SPI. Exiting.")
-        return
-    
-    # Final summary
-    logger.info("\n" + "="*80)
-    logger.info("PROCESSING COMPLETE")
-    logger.info("="*80)
-    logger.info(f"\nOutput directory: {OUTPUT_DIR}")
-    logger.info(f"\nOutput files:")
-    logger.info(f"  1. basin_monthly_climate_1979_1984_gridmet.csv (optional)")
-    logger.info(f"     └─ Early GridMET aggregation when 1979-1984 exports are available")
-    logger.info(f"  2. basin_monthly_climate_1985_plus_ha.csv")
-    logger.info(f"     └─ HA basin climate summaries used for SPI generation")
-    logger.info(f"  3. basin_monthly_climate_full_period_1979_2025.csv")
-    logger.info(f"     └─ Combined basin climate dataset over the available period")
-    logger.info(f"  4. {DROUGHT_INDICES_FILE} ⭐")
-    logger.info(f"     └─ FINAL: SPI data for the full available basin climate record")
-    logger.info(f"     └─ All configured timescales written to the Phase 2 input path")
-    
-    logger.info(f"\nFinal dataset summary ({spi_results['YEAR'].min()}-{spi_results['YEAR'].max()}):")
-    logger.info(f"  Basins: {spi_results['HA_NAME_CODE'].nunique()}")
-    logger.info(f"  Date range: {spi_results['YEAR'].min()}-{spi_results['YEAR'].max()}")
-    logger.info(f"  Total records: {len(spi_results)}")
-    logger.info(f"  SPI timescales: {SPI_TIMESCALES}")
-    
-    logger.info("\n✓ Extended SPI dataset ready for use!")
-    logger.info(
-        f"  ✓ Gamma calibration requested for {SPI_CALIBRATION_START}-{SPI_CALIBRATION_END} and clipped to each basin's available overlap"
-    )
-    logger.info("  ✓ SPI values computed for the full available basin climate period")
-    logger.info("  ✓ Safe to join with Nevada basin summaries for Phase 2 models")
+        spi['HA'] = spi['HA'].astype(str)
+        spi.insert(2, 'region_type', region_type)
+        results[region_type] = spi
+
+    by_region = pd.concat(results.values(), ignore_index=True)
+    by_region.to_csv(PATHS.spi_monthly, index=False)
+    logger.info(f"\n✓ SPI for every series: {PATHS.spi_monthly}")
+
+    basin_spi = select_basin_spi_source(results['ha_only'], results['contributing_area'])
+    basin_spi.to_csv(PATHS.spi_table, index=False)
+    sept = basin_spi[(basin_spi['MONTH'] == CFG['spi']['reference_month'])
+                     & (basin_spi['YEAR'] >= CFG['run']['start_year'])]
+    logger.info(f"✓ Basin SPI table: {PATHS.spi_table}")
+    logger.info(f"  Basins: {basin_spi['HA_NAME_CODE'].nunique()} "
+                f"({(basin_spi.drop_duplicates('HA')['spi_source'] == 'prism_contributing_area').sum()} contributing area)")
+    logger.info(f"  September SPI-12 missing in {CFG['run']['start_year']}-{CFG['run']['end_year']}: "
+                f"{int(sept['SPI_12m'].isna().sum())} basin-years")
 
 
 if __name__ == '__main__':
-    import argparse
-    
-    # Parse command-line arguments
-    parser = argparse.ArgumentParser(
-        description='Extend basin climate SPI data using GridMET 1979-1984 gap filling.'
-    )
-    parser.add_argument(
-        '--gridmet-dir', 
-        type=str, 
-        help='Directory containing GridMET field summaries (1979-1984)'
-    )
-    parser.add_argument(
-        '--ha-summaries', 
-        type=str, 
-        help='Path to HA summaries CSV (1985+)'
-    )
-    parser.add_argument(
-        '--output-dir', 
-        type=str, 
-        help='Output directory for extended SPI data'
-    )
-    parser.add_argument(
-        '--config',
-        type=str,
-        help='Path to custom config file (default: config/workflow_config.yaml)'
-    )
-    parser.add_argument(
-        '--environment',
-        type=str,
-        choices=['hpc', 'collaborator'],
-        help='Environment-specific overrides (hpc, collaborator)'
-    )
-    
-    args = parser.parse_args()
-    
-    # Reload config if custom path provided
-    if args.config or args.environment:
-        from config import load_config
-        cfg = load_config(
-            config_path=args.config,
-            environment=args.environment,
-            reload=True
-        )
-        config = get_script_config()
-    
-    # Override config with CLI arguments
-    if args.gridmet_dir:
-        config['gridmet_dir'] = Path(args.gridmet_dir)
-        globals()['GRIDMET_DIR'] = Path(args.gridmet_dir)
-    if args.ha_summaries:
-        config['ha_summaries_file'] = Path(args.ha_summaries)
-        globals()['HA_SUMMARIES_FILE'] = Path(args.ha_summaries)
-    if args.output_dir:
-        config['output_dir'] = Path(args.output_dir)
-        globals()['OUTPUT_DIR'] = Path(args.output_dir)
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    
-    logger.info("="*80)
-    logger.info("EXTEND BASIN CLIMATE SPI (1979-2023)")
-    logger.info("="*80)
-    logger.info(f"GridMET directory: {GRIDMET_DIR}")
-    logger.info(f"HA summaries file: {HA_SUMMARIES_FILE}")
-    logger.info(f"Output directory: {OUTPUT_DIR}")
-    logger.info(f"SPI timescales: {SPI_TIMESCALES}")
-    logger.info("="*80 + "\n")
-    
     main()

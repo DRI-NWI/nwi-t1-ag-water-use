@@ -5,7 +5,15 @@ This script generates climatological averages for field-level evapotranspiration
 fractions (EToF) to support gap-filling of missing satellite data.
 
 CONFIGURATION:
-All paths and parameters loaded from config/workflow_config.yaml
+All paths and parameters loaded from config/nwi_t1_final.yaml
+
+NWI T1 edits (marked "NWI T1" below):
+  * Input is the year-partitioned OpenET ENSEMBLE parquet export instead of a folder of
+    field-summary CSVs.
+  * HA_NAME_CODE comes from the boundary layer's Basin attribute, the same hydrographic
+    area the field processor uses, so climatology rows match the rows they fill.
+  * Windows come from etof.climatology_windows; files go to run/01_inputs/etof_climatology/.
+  * The unused ETrF climatology function and the ETrF file check are removed.
 
 Author: Peter ReVelle
         With AI assistance from Claude, Gemini, ChatGPT, and other models
@@ -21,23 +29,22 @@ from pathlib import Path
 from datetime import datetime
 import warnings
 
-# Add project root to path for config import
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
-# Import unified configuration
-from config import load_config
+# NWI T1: run configuration
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "utils"))
+from nwi_config import load_config, RunPaths  # noqa: E402
 
 
-def calculate_etof_climatologies(input_dir, output_dir, gap_windows=None, group_cols=['HA_NAME_CODE', 'OPENET_ID']):
+def calculate_etof_climatologies(input_dir, output_dir, gap_windows=None, group_cols=['HA_NAME_CODE', 'OPENET_ID'],
+                                 field_basins=None):
     """
     Calculate 10-year EToF climatologies for each field and gap-filling window.
     
     Parameters:
-    input_dir: Directory containing field summary CSV files
+    input_dir: Directory containing the year-partitioned ENSEMBLE parquet files (NWI T1)
     output_dir: Directory to save climatology files
     gap_windows: List of tuples defining gap-filling windows
     group_cols: List of columns to group by for processing
+    field_basins: DataFrame of NWI_ID and HA_NAME_CODE from the boundary layer (NWI T1)
     
     Returns:
     Dictionary of climatology file paths for each window
@@ -51,30 +58,20 @@ def calculate_etof_climatologies(input_dir, output_dir, gap_windows=None, group_
     os.makedirs(output_dir, exist_ok=True)
     climatology_files = {}
     
-    # Load all available data files
-    files = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.endswith('.csv')]
+    # NWI T1: read the year-partitioned ENSEMBLE parquet export
+    files = sorted(Path(input_dir).rglob('*.parquet'))
     
     if not files:
-        print(f"No CSV files found in {input_dir}")
+        print(f"No parquet files found in {input_dir}")
         return {}
     
     print(f"Loading {len(files)} files for climatology calculation...")
     
-    # Combine all data
-    dfs = []
-    for file in files:
-        try:
-            df = pd.read_csv(file)
-            dfs.append(df)
-        except Exception as e:
-            print(f"Error loading {file}: {e}")
-            continue
-    
-    if not dfs:
-        print("No valid CSV files could be loaded")
-        return {}
-    
+    columns = ['OPENET_ID', 'NWI_ID', 'YEAR', 'MONTH', 'ETA_MM', 'ETO_MM']
+    dfs = [pd.read_parquet(file, columns=columns) for file in files]
     combined_df = pd.concat(dfs, ignore_index=True)
+    combined_df['MONTH'] = combined_df['MONTH'].astype(int)
+    combined_df['YEAR'] = combined_df['YEAR'].astype(int)
     print(f"Loaded {len(combined_df)} total records")
     
     # ========================================
@@ -119,9 +116,8 @@ def calculate_etof_climatologies(input_dir, output_dir, gap_windows=None, group_
     
     print(f"Records with valid EToF for climatology: {len(combined_df)}")
     
-    # Create HA_NAME_CODE if not present
-    if 'HA_NAME_CODE' not in combined_df.columns:
-        combined_df['HA_NAME_CODE'] = combined_df['HYD_AREA_N'].astype(str) + ' (' + combined_df['HYD_AREA'].astype(str) + ')'
+    # NWI T1: hydrographic area from the boundary layer's Basin attribute (as in the processor)
+    combined_df = combined_df.merge(field_basins, on='NWI_ID', how='left', validate='many_to_one')
     
     # Calculate climatologies for each window
     for start_year, end_year in gap_windows:
@@ -195,216 +191,50 @@ def calculate_etof_climatologies(input_dir, output_dir, gap_windows=None, group_
     return climatology_files
 
 
-def calculate_etrf_climatologies(input_dir, output_dir, gap_windows=None, group_cols=['HA_NAME_CODE', 'OPENET_ID']):
+def load_field_basins(fields_gpkg):
     """
-    Calculate 10-year ETr   F climatologies for each field and gap-filling window.
-    
-    Parameters:
-    input_dir: Directory containing field summary CSV files
-    output_dir: Directory to save climatology files
-    gap_windows: List of tuples defining gap-filling windows
-    group_cols: List of columns to group by for processing
-    
-    Returns:
-    Dictionary of climatology file paths for each window
-    """
-    if gap_windows is None:
-        gap_windows = [
-            (1985, 1991), (1992, 1997), (1998, 2003),
-            (2004, 2009), (2010, 2015), (2016, 2021), (2022, 2025)
-        ]
-    
-    os.makedirs(output_dir, exist_ok=True)
-    climatology_files = {}
-    
-    # Load all available data files
-    files = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.endswith('.csv')]
-    
-    if not files:
-        print(f"No CSV files found in {input_dir}")
-        return {}
-    
-    print(f"Loading {len(files)} files for climatology calculation...")
-    
-    # Combine all data
-    dfs = []
-    for file in files:
-        try:
-            df = pd.read_csv(file)
-            dfs.append(df)
-        except Exception as e:
-            print(f"Error loading {file}: {e}")
-            continue
-    
-    if not dfs:
-        print("No valid CSV files could be loaded")
-        return {}
-    
-    combined_df = pd.concat(dfs, ignore_index=True)
-    
-    # Calculate EToF if not already present
-    if 'ETrF' not in combined_df.columns:
-        combined_df['ETrF'] = np.where(
-            combined_df['ETR_MM'] > 0, 
-            combined_df['ETA_MM'] / combined_df['ETR_MM'], 
-            np.nan
-        )
-    
-    # Create HA_NAME_CODE if not present
-    if 'HA_NAME_CODE' not in combined_df.columns:
-        combined_df['HA_NAME_CODE'] = combined_df['HYD_AREA_N'].astype(str) + ' (' + combined_df['HYD_AREA'].astype(str) + ')'
-    
-    for start_year, end_year in gap_windows:
-        print(f"Calculating climatologies for {start_year}-{end_year} window...")
-        
-        # Filter data for this window
-        window_data = combined_df[
-            (combined_df['YEAR'] >= start_year) & 
-            (combined_df['YEAR'] <= end_year)
-        ].copy()
-        
-        if len(window_data) == 0:
-            print(f"No data found for window {start_year}-{end_year}")
-            continue
-        
-        # Calculate monthly climatologies for each field
-        climatology_data = []
-        
-        for month in range(1, 13):
-            month_data = window_data[window_data['MONTH'] == month]
-            
-            if len(month_data) == 0:
-                continue
-                
-            # Calculate mean EToF for each field for this month
-            month_climo = month_data.groupby(group_cols)['ETrF'].mean().reset_index()
-            month_climo['MONTH'] = month
-            month_climo = month_climo.rename(columns={'ETrF': f'ETrF_climo_{month:02d}'})
-            
-            climatology_data.append(month_climo)
-        
-        if not climatology_data:
-            print(f"No climatology data calculated for {start_year}-{end_year}")
-            continue
-        
-        # Pivot to wide format (Oregon style)
-        combined_climo = climatology_data[0][group_cols].copy()
-        
-        for month_climo in climatology_data:
-            month_num = month_climo['MONTH'].iloc[0]
-            col_name = f'ETrF_climo_{month_num:02d}'
-            combined_climo = pd.merge(
-                combined_climo,
-                month_climo[group_cols + [col_name]],
-                on=group_cols,
-                how='outer'
-            )
-        
-        # Save climatology file
-        climo_filename = f'etrf_climatology_{start_year}_{end_year}.csv'
-        climo_filepath = os.path.join(output_dir, climo_filename)
-        
-        # Set OPENET_ID as index for Oregon-style format
-        if 'OPENET_ID' in combined_climo.columns:
-            combined_climo = combined_climo.set_index('OPENET_ID')
-        
-        combined_climo.to_csv(climo_filepath)
-        climatology_files[f'{start_year}_{end_year}'] = climo_filepath
-        
-        print(f"Saved climatology for {len(combined_climo)} fields in {start_year}-{end_year} to {climo_filename}")
-    
-    return climatology_files
+    NWI T1: hydrographic area of every field from the boundary layer.
 
+    Parameters
+    ----------
+    fields_gpkg : str
+        2026-08-20 NWI boundary layer.
 
+    Returns
+    -------
+    pd.DataFrame
+        NWI_ID and HA_NAME_CODE ('Name (code)' parsed from the Basin attribute, e.g.
+        '101_CarsonDesert' -> 'CarsonDesert (101)').
+    """
+    import geopandas as gpd
+    fields = gpd.read_file(fields_gpkg, columns=['NWI_ID', 'Basin'], ignore_geometry=True)
+    parts = fields['Basin'].astype('string').str.extract(r'^([^_]+)_(.*)$')
+    fields['HA_NAME_CODE'] = parts[1].str.strip() + ' (' + parts[0].str.strip() + ')'
+    fields['NWI_ID'] = fields['NWI_ID'].astype(str)
+    return fields[['NWI_ID', 'HA_NAME_CODE']]
 
-def check_climatology_files_exist(climatology_dir, gap_windows=None):
-    """
-    Check if climatology files exist for all gap-filling windows.
-    
-    Returns:
-    dict: Dictionary with window keys and file existence status
-    """
-    if gap_windows is None:
-        gap_windows = [
-            (1985, 1991), (1992, 1997), (1998, 2003),
-            (2004, 2009), (2010, 2015), (2016, 2021), (2022, 2025)
-        ]
-    
-    file_status = {}
-    
-    for start_year, end_year in gap_windows:
-        climo_filename = f'etrf_climatology_{start_year}_{end_year}.csv'
-        climo_filepath = os.path.join(climatology_dir, climo_filename)
-        
-        file_status[f'{start_year}_{end_year}'] = {
-            'exists': os.path.exists(climo_filepath),
-            'filepath': climo_filepath
-        }
-    
-    return file_status
 
 if __name__ == "__main__":
-    import argparse
-    
-    # Parse command-line arguments
-    parser = argparse.ArgumentParser(
-        description='Calculate field-level EToF climatologies for gap-filling.'
-    )
-    parser.add_argument(
-        '--input-dir',
-        type=str,
-        required=True,
-        help='Directory containing field summary CSV files'
-    )
-    parser.add_argument(
-        '--output-dir',
-        type=str,
-        help='Directory to save climatology files (default: {input_dir}/../climatologies)'
-    )
-    parser.add_argument(
-        '--config',
-        type=str,
-        help='Path to custom config file (default: config/workflow_config.yaml)'
-    )
-    parser.add_argument(
-        '--environment',
-        type=str,
-        choices=['hpc', 'collaborator'],
-        help='Environment-specific overrides (hpc, collaborator)'
-    )
-    
-    args = parser.parse_args()
-    
-    # Load configuration (even though this script is mostly standalone, loads for consistency)
-    cfg = load_config(
-        config_path=args.config,
-        environment=args.environment,
-        reload=args.config or args.environment
-    )
-    
-    # Determine paths
-    input_directory = args.input_dir
-    
-    if args.output_dir:
-        climatology_directory = args.output_dir
-    else:
-        # Default: ../climatologies relative to input directory
-        climatology_directory = str(Path(input_directory).parent / 'climatologies')
-    
+    # NWI T1: all settings come from config/nwi_t1_final.yaml
+    cfg = load_config()
+    paths = RunPaths(cfg).make()
+    windows = [tuple(w) for w in cfg['etof']['climatology_windows']]
+
     print("="*80)
     print("CALCULATE FIELD CLIMATOLOGIES")
     print("="*80)
-    print(f"Input directory: {input_directory}")
-    print(f"Output directory: {climatology_directory}")
+    print(f"Input directory: {cfg['inputs']['ensemble_dir']}")
+    print(f"Output directory: {paths.etof_climatology}")
     print("="*80 + "\n")
-    
-    print("Calculating EToF climatologies...")
+
     climatology_files = calculate_etof_climatologies(
-        input_dir=input_directory,
-        output_dir=climatology_directory,
-        group_cols=['HA_NAME_CODE', 'OPENET_ID']
+        input_dir=cfg['inputs']['ensemble_dir'],
+        output_dir=str(paths.etof_climatology),
+        gap_windows=windows,
+        group_cols=['HA_NAME_CODE', 'OPENET_ID'],
+        field_basins=load_field_basins(cfg['inputs']['fields_gpkg']),
     )
-    
+
     if climatology_files:
         print("\n" + "="*80)
         print("Climatology calculation completed successfully!")
