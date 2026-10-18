@@ -1,5 +1,7 @@
 # Data dictionary
 
+For what each column replaces in the earlier packages (kept, renamed, replaced or dropped, with reasons), see [legacy/COLUMN_CROSSWALK.md](legacy/COLUMN_CROSSWALK.md).
+
 The files are written under `<output_root>/<run_id>/`. Volumes are in acre-ft, depths in ft
 unless marked mm, and areas in acres. "Field-month" is one field in one calendar month.
 

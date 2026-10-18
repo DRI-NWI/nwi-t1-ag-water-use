@@ -58,7 +58,7 @@ Maps, time series and checks for every variable are on these pages:
 ## Outputs
 
 Outputs are written to `<output_root>/<run_id>/`, outside the repository. Every column is
-defined in [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md).
+defined in [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md). Changes from the earlier packages, column by column: [docs/legacy/COLUMN_CROSSWALK.md](docs/legacy/COLUMN_CROSSWALK.md).
 
 | Path | Content |
 |---|---|
