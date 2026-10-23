@@ -211,7 +211,13 @@ def load_field_basins(fields_gpkg):
     parts = fields['Basin'].astype('string').str.extract(r'^([^_]+)_(.*)$')
     fields['HA_NAME_CODE'] = parts[1].str.strip() + ' (' + parts[0].str.strip() + ')'
     fields['NWI_ID'] = fields['NWI_ID'].astype(str)
-    return fields[['NWI_ID', 'HA_NAME_CODE']]
+    # One row per field. A field stored as several polygon rows keeps one row; a field whose
+    # rows name different HAs is an error in the boundary layer.
+    fields = fields[['NWI_ID', 'HA_NAME_CODE']].drop_duplicates()
+    conflicting = fields['NWI_ID'][fields['NWI_ID'].duplicated()].unique()
+    if len(conflicting):
+        raise ValueError(f'{len(conflicting)} fields have rows in different HAs, e.g. {list(conflicting[:5])}')
+    return fields
 
 
 if __name__ == "__main__":

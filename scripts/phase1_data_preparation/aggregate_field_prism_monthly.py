@@ -9,7 +9,8 @@ PPT_PRISM_MM, ETO_MET_MM, N_DAYS.
 Source: agricultural-water-forecasting/scripts/scripts_otter/data_folder/nwi_field_export_20260820/met/year=YYYY/met_YYYYMMDD.parquet
 (config highvolume_met_extraction_share/ee_extract_nv_20260820.toml: precip_source=prism, PRISM_800_DAILY 'ppt', scale 800, field-centroid mode).
 Processed one year at a time with duckdb (hive_partitioning disabled; files hold NWI_ID, date, eto, ppt only; year/month taken from `date`).
-Outputs: field_monthly_ppt_prism800.parquet (NWI_ID, year, month, ppt_mm, n_days) + qc_daily_by_year.csv
+Outputs (run/01_inputs/): field_monthly_prism_ppt_eto.parquet (NWI_ID, YEAR, MONTH, PPT_PRISM_MM, ETO_MET_MM, N_DAYS)
+and prism_qc_by_year.csv (daily-file checks per year).
 """
 from pathlib import Path
 import calendar
