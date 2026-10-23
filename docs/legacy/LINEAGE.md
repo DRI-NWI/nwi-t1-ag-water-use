@@ -70,4 +70,4 @@ Field-file columns from earlier packages that are not produced:
 |---|---|
 | `ETNET_MM`, `AR_MM` | export 0.85 × PPT products; superseded by `NetET_final` and `AR_final` |
 | `Eff_PPT_Adjusted_acre_ft` | superseded by `Eff_PPT_vol`, `GW_subsidy` and `Carryforward_Used` |
-| `IRR_ATTR_ASSUMPTION` | replaced by the `IRR_SRC_ASSUMED` flag |
+| `IRR_ATTR_ASSUMPTION` | not written; the source assumption is the `IRR_SRC_ASSUMED` flag, which is kept |
