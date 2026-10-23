@@ -20,6 +20,18 @@ Every field and every month, 1985–2025, with no irrigation filter.
 In the GW and SW files, a mixed field's volumes, `ACRES_FTR_GEOM` and `ACRES_IRR` are scaled
 by its share for that year. GW + SW = whole field for every volume.
 
+### Which values to use
+
+Every ET value in the field files is gap-filled; the raw export values are not written.
+
+| Use | Columns |
+|---|---|
+| Rates (ft per month) | `ETa_final_ft`, `NetET_final_ft`, `AR_final_ft`, `PPT_final_ft` |
+| Volumes (acre-ft) | `ETa_final_acre_ft`, `NetET_final_acre_ft`, `AR_final_acre_ft`, `PPT_vol_acre_ft`, `Eff_PPT_vol_acre_ft`, `GW_subsidy_acre_ft` |
+
+`interpolation_method` shows how each month's ETa was obtained. 1,194 of 14,434,296
+field-months have no observed ETa to fill from (`unfilled_missing`) and stay missing.
+
 ### Identity and attributes
 
 | Column | Description |
@@ -57,10 +69,8 @@ by its share for that year. GW + SW = whole field for every volume.
 | `ACRES_IRR` | acres | IrrMapper irrigated area of the field that year (component share in GW/SW) |
 | `%_IRRIGATED` | fraction | IrrMapper irrigated fraction of the field that year (constant within a year) |
 | `ETO_MM` | mm | Reference ET (OpenET gridMET) |
-| `ETA_MM` | mm | OpenET ensemble ETa after gap filling (zero and −999 exports are missing) |
-| `ETA_MM_EXPORT` | mm | OpenET ensemble ETa as exported, before gap filling |
-| `EToF` | – | ETa / ETo from the export |
-| `EToF_interpolated` | – | EToF after gap filling |
+| `ETA_MM` | mm | OpenET ensemble ETa, gap-filled (same as `ETA_MM_post_interp`) |
+| `EToF_interpolated` | – | ETa / ETo, gap-filled |
 | `interpolation_method` | – | `original`, `linear_1month`, `climatology`, `unfilled_missing` |
 | `ETA_MM_post_interp` | mm | EToF_interpolated × ETO_MM |
 | `PPT_MM` | mm | PRISM 800 m precipitation |

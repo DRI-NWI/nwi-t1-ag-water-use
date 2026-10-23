@@ -1230,13 +1230,15 @@ def add_gw_subsidy(df, gw_frac_by_field, irrigated_only=False, irrigated_min_fra
 
 
 # NWI T1: columns written to the field files (names as in the original outputs; additions
-# are listed in docs/legacy/COLUMN_CROSSWALK.md)
+# are listed in docs/legacy/COLUMN_CROSSWALK.md). Only gap-filled ET is written: the raw
+# export EToF is not, so every ET value in the files is the one to use (ETA_MM is filled
+# in place by the gap-filling steps; interpolation_method says how each month was obtained).
 FIELD_OUTPUT_COLUMNS = [
     'NWI_ID', 'NWI_PARENT', 'STATE', 'COUNTY_NAME', 'HYD_AREA', 'HYD_AREA_N', 'HA_NAME_CODE', 'GRIDMET_ID',
     'IRR_SRC', 'IRR_SRC_ORIGINAL', 'IRR_SRC_ASSUMED', 'IRR_SRC_OVERRIDE', 'irr_eff', 'ITYPE', 'CROP_major',
     'YEAR', 'MONTH', 'DATE', 'water_source', 'allocation_method', 'allocation_ratio', 'spi_value', 'spi_source',
     'ACRES_FTR_GEOM', 'ACRES_IRR', '%_IRRIGATED',
-    'ETO_MM', 'ETA_MM', 'ETA_MM_EXPORT', 'EToF', 'EToF_interpolated', 'interpolation_method', 'ETA_MM_post_interp',
+    'ETO_MM', 'ETA_MM', 'EToF_interpolated', 'interpolation_method', 'ETA_MM_post_interp',
     'PPT_MM', 'EFF_PPT_MM', 'peff_method', 'gw_frac', 'AWC', 'PAW_ft',
     'ETa_final_acre_ft', 'PPT_vol_acre_ft', 'Eff_PPT_vol_acre_ft', 'NetET_pre_subsidy_acre_ft',
     'GW_subsidy_potential_acre_ft', 'GW_subsidy_acre_ft', 'NetET_vol_intermediate_acre_ft',
@@ -1434,7 +1436,6 @@ def process_field_summaries(cfg, paths, spi_data, output_dir, summary_dir, write
             # Bug in OpenET collection: ET values of 0 when count band != 0 are actually missing data
             # Zero values in other variables (like PPT_MM) are valid, so only apply to ETA_MM
             if col == 'ETA_MM':
-                combined_df['ETA_MM_EXPORT'] = combined_df['ETA_MM']   # NWI T1: keep the exported value
                 zero_count = (combined_df[col] == 0).sum()
                 if zero_count > 0:
                     combined_df[col] = combined_df[col].replace(0, np.nan)

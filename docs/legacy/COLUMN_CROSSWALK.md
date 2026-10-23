@@ -30,7 +30,7 @@ File and column names are the original ones. No column is renamed. Status:
 |---|---|---|
 | `NWI_ID`, `NWI_PARENT`, `STATE`, `HYD_AREA`, `HYD_AREA_N`, `HA_NAME_CODE`, `GRIDMET_ID`, `irr_eff`, `ITYPE`, `IRR_SRC`, `IRR_SRC_ASSUMED` | kept | |
 | `YEAR`, `MONTH`, `DATE`, `water_source`, `allocation_method`, `allocation_ratio`, `spi_value` | kept | |
-| `ACRES_FTR_GEOM`, `%_IRRIGATED`, `ETO_MM`, `ETA_MM`, `EToF`, `EToF_interpolated`, `interpolation_method`, `ETA_MM_post_interp` | kept | |
+| `ACRES_FTR_GEOM`, `%_IRRIGATED`, `ETO_MM`, `ETA_MM`, `EToF_interpolated`, `interpolation_method`, `ETA_MM_post_interp` | kept | |
 | `AWC`, `PAW_ft`, `Soil_Moisture_Cap_acre_ft`, `Soil_Moisture_Overflow_acre_ft`, `Water_Surplus_Cumulative_acre_ft` | kept | |
 | `ETa_final_acre_ft`, `Eff_PPT_vol_acre_ft`, `NetET_vol_intermediate_acre_ft`, `NetET_final_acre_ft`, `AR_final_acre_ft`, `PPT_vol_acre_ft` | kept | Net ET and applied water include OTTER effective precipitation and the GW subsidy. `NetET_vol_intermediate_acre_ft` is the net ET entering carry-forward, now after the subsidy |
 | `ETa_final_ft`, `NetET_final_ft`, `AR_final_ft`, `PPT_final_ft` | kept | |
@@ -47,6 +47,7 @@ File and column names are the original ones. No column is renamed. Status:
 | `ACRES_ALL` | dropped | the export's total-area column, not used in any calculation |
 | `irr_eff_ASSUMED`, `IRR_ATTR_ASSUMED`, `IRR_ATTR_ASSUMPTION` | dropped | `irr_eff` is complete in the export, so it is never assumed; the source assumption is `IRR_SRC_ASSUMED` |
 | `spi_timescale` | dropped | always 12 |
+| `EToF` | dropped | the raw export ratio with its gaps; only gap-filled ET is written (`EToF_interpolated`) |
 | `date` | dropped | duplicate of `DATE` |
 
 Added field columns:
@@ -57,7 +58,6 @@ Added field columns:
 | `IRR_SRC_ORIGINAL`, `IRR_SRC_OVERRIDE` | source before basin rules, and the rule applied |
 | `CROP_major` | dominant CDL crop (subsidy rooting depth) |
 | `spi_source` | PRISM contributing area or HA |
-| `ETA_MM_EXPORT` | ETa as exported, before gap filling |
 | `peff_method` | `otter` or the 0.85 × PPT fallback |
 | `gw_frac` | groundwater-ET fraction f |
 | `NetET_pre_subsidy_acre_ft`, `GW_subsidy_potential_acre_ft`, `GW_subsidy_acre_ft`, `Carryforward_Used_acre_ft` | water-balance terms |
