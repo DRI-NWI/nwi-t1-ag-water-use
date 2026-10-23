@@ -16,7 +16,7 @@ Results are summed to hydrographic areas (HAs) and Nevada counties.
 
 ## What was run
 
-Run `nwi_t1_final_20261016`, configured by [`config/nwi_t1_final.yaml`](config/nwi_t1_final.yaml).
+Run `nwi_t1_final_20261018`, configured by [`config/nwi_t1_final.yaml`](config/nwi_t1_final.yaml).
 
 | Component | Setting |
 |---|---|
@@ -49,6 +49,33 @@ The full method is in [docs/METHODS.md](docs/METHODS.md).
 These totals include the out-of-state fields of HAs that cross the state line. Nevada
 fields alone have net ET 936,122 and applied water 1,366,930 acre-ft/yr. Each HA summary is
 written for all fields and for Nevada fields only (`_NV_fields_only`).
+
+### Summary figures
+
+![Statewide annual](docs/images/fig05_statewide_annual.png)
+
+**Statewide, by year.** ETa, precipitation, effective precipitation, net ET and applied
+water; the GW-ET subsidy and carry-forward removed from net ET; net ET, applied water and
+irrigated area split GW and SW.
+
+![HA volumes](docs/images/fig02_ha_volumes.png)
+
+**By hydrographic area.** Each water-balance term in acre-ft/yr (log scale); grey HAs have no
+irrigated fields.
+
+![HA depths](docs/images/fig03_ha_depths.png)
+
+**By hydrographic area, as depths.** The same terms in ft (volume ÷ irrigated acres).
+
+![GW and SW](docs/images/fig04_ha_gw_sw.png)
+
+**Groundwater and surface water.** Net ET and applied water by source, the GW share of net
+ET, and the mean SW share of mixed fields.
+
+![HA subsidy](docs/images/fig13_subsidy_ha_new_vs_ma.png)
+
+**GW-ET subsidy by HA.** With the new depth to water and with Ma et al., their difference,
+the subsidy as a share of ETa, and the share of irrigated fields with a subsidy.
 
 Maps, time series and checks for every variable are on these pages:
 - [docs/RESULTS.md](docs/RESULTS.md): the water balance, allocation, inputs, and irrigated area (IrrMapper vs XGBRF).
