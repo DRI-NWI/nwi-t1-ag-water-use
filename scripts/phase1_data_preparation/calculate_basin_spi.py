@@ -154,7 +154,7 @@ def calculate_basin_spi_extended(basin_climate_df, output_file, timescales=[3, 6
         # Extract precipitation
         precipitation = basin_data['PPT_MM'].values
         
-        # CORRECT (replace with this):
+        # SPI needs a gap-free monthly series: skip the basin if any month's PPT is missing
         n_missing = np.isnan(precipitation).sum()
         if n_missing > 0:
             pct_missing = 100 * n_missing / len(precipitation)
@@ -212,7 +212,7 @@ def calculate_basin_spi_extended(basin_climate_df, output_file, timescales=[3, 6
         )
         
         if len(output_results) == 0:
-            logger.error("No records remain after filtering to 1985-2023!")
+            logger.error("No records remain in the output period!")
             logger.error("Check that data actually contains years >= 1985")
             return pd.DataFrame()
         
@@ -227,7 +227,7 @@ def calculate_basin_spi_extended(basin_climate_df, output_file, timescales=[3, 6
             logger.info(f"  {col}: {valid:6d}/{total} ({pct:5.1f}%) valid")
             
             if valid == 0:
-                logger.warning(f"    ⚠ WARNING: {col} has NO valid values for 1985-2023!")
+                logger.warning(f"    ⚠ WARNING: {col} has NO valid values in the output period!")
         
         output_results.to_csv(output_file, index=False)
         

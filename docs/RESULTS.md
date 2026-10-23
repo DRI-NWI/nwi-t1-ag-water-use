@@ -1,6 +1,6 @@
 # Results
 
-Run `nwi_t1_final_20261016`, 1985–2025. Unless a figure says otherwise, values cover
+Run `nwi_t1_final_20261018`, 1985–2025. Unless a figure says otherwise, values cover
 irrigated field-years (IrrMapper `%_IRRIGATED` > 0.5), the population of the HA and county
 summaries, across all HAs including their fields outside Nevada. Means are 1985–2025
 annual means.

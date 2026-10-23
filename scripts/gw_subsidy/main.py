@@ -10,13 +10,12 @@ Run from this folder:  python main.py all
 Each stage caches its artifact and is skipped if present (use --force to recompute).
 
 Examples:
-    python main.py fast-track            # shallow basins, POR-mean ET, 4 slide figures
-    python main.py all                   # full pipeline (all ET-covered fields)
+    python main.py all                   # all stages
     python main.py wtd                   # run a single stage
     python main.py all --force           # ignore caches and recompute
     python main.py soil --basins 101,105 # restrict the soil stage to specific basins
 
-Stages: wtd -> soil -> validate -> subsidy -> basins -> figures
+Stages: wtd -> soil -> params
 """
 
 from __future__ import annotations
