@@ -1,0 +1,39 @@
+# Bridge from the delivered 2026-08-23 package to the final run, one change at a time.
+# Each variant is a set of overrides on config/nwi_t1_final.yaml. Variants only write
+# HA summaries and statewide totals; the final variant writes everything. Statewide totals
+# are written for both all field-months and irrigated field-months.
+variants:
+  v0a_reproduce_0823_no_static:
+    etof: {climatology_fill: false}
+    summaries: {irrigated_only: false}   # the delivered package had no irrigation filter
+    precipitation: {source: export}
+    effective_precipitation: {source: export_085}
+    spi: {source: legacy}
+    allocation: {apply_static_overrides: false, apply_dynamic_overrides: false}
+    gw_subsidy: {enabled: false}
+  v0b_reproduce_0823_static153:
+    etof: {climatology_fill: false}
+    summaries: {irrigated_only: false}   # the delivered package had no irrigation filter
+    precipitation: {source: export}
+    effective_precipitation: {source: export_085}
+    spi: {source: legacy}
+    allocation: {apply_static_overrides: true, apply_dynamic_overrides: false}
+    gw_subsidy: {enabled: false}
+  v1_basin_overrides:
+    etof: {climatology_fill: false}
+    precipitation: {source: export}
+    effective_precipitation: {source: export_085}
+    spi: {source: legacy}
+    gw_subsidy: {enabled: false}
+  v2_prism_spi_d24:
+    etof: {climatology_fill: false}
+    precipitation: {source: export}
+    effective_precipitation: {source: export_085}
+    gw_subsidy: {enabled: false}
+  v3_prism_ppt_otter_peff:
+    etof: {climatology_fill: false}
+    gw_subsidy: {enabled: false}
+  v4a_gw_subsidy_no_climatology:
+    etof: {climatology_fill: false}
+  # Final: everything above plus the EToF climatology fill.
+  v4_final: {}
