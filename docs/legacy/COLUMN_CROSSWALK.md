@@ -22,7 +22,7 @@ File and column names are the original ones. No column is renamed. Status:
 |---|---|
 | `field_summaries_EToF_final_{GW,SW}.csv` | same; plus `field_summaries_EToF_final.csv` (whole field) and a `.parquet` copy of each |
 | `ha_summaries_EToF_final_{GW,SW}.csv` | same (all fields in the HA, including out-of-state fields); plus `ha_summaries_EToF_final.csv` (whole field) and `..._NV_fields_only.csv` versions of each (Nevada fields only) |
-| `counties/county_wide_summaries_EToF_final_{GW,SW}.csv` | `county_wide_summaries_EToF_final{,_GW,_SW}.csv` in `06_summaries/` |
+| `county_wide_summaries_EToF_final_{GW,SW}.csv` (2026-09-02 package) | same; plus `county_wide_summaries_EToF_final.csv` (whole field), in `06_summaries/` |
 
 ## Field files
 
@@ -72,10 +72,11 @@ County summaries cover Nevada fields, as before.
 | keys (`HA_NAME_CODE`, `HYD_AREA`, `HYD_AREA_N` / `COUNTY_NAME`, `YEAR`, `MONTH`) | kept | |
 | `ACRES_FTR_GEOM`, `ETa_final_acre_ft`, `Eff_PPT_vol_acre_ft`, `NetET_vol_intermediate_acre_ft`, `NetET_final_acre_ft`, `AR_final_acre_ft`, `PPT_vol_acre_ft`, `Soil_Moisture_Cap_acre_ft`, `Soil_Moisture_Overflow_acre_ft`, `Water_Surplus_Cumulative_acre_ft` | kept | sums |
 | `ETa_final_ft`, `NetET_final_ft`, `AR_final_ft`, `PPT_final_ft` | kept | summed volume ÷ summed acres |
-| `field_count`, `num_fields_irrigated`, `is_gw_field`, `is_sw_field`, `is_mixed_field`, `percent_gw_fields`, `percent_sw_fields` | kept | counts and percentages |
+| `field_count`, `num_fields_irrigated`, `is_gw_field`, `is_sw_field`, `is_mixed_field`, `percent_gw_fields`, `percent_sw_fields` | kept | counts and percentages (`num_fields_irrigated` is new in the county files) |
 | `ACRES_IRR` | fixed | GW/SW files: split by share (see field files) |
 | `ETO_MM`, `PPT_MM`, `EFF_PPT_MM` | fixed | acre-weighted means; earlier unweighted means |
 | `allocation_method` | kept, HA only | the basin-year rule |
+| `HYD_AREA`, `HYD_AREA_N`, `allocation_method` (county files) | dropped | a county spans several HAs |
 | `spi_value`, `allocation_ratio` | dropped | earlier a sum over fields (e.g. `spi_value` = −15.3); the basin-year values are the added `spi_sept12` and `mixed_sw_ratio` (HA only) |
 | `NWI_ID`, `OPENET_ID`, `NWI_PARENT`, `GRIDMET_ID`, `Basin`, `DATE`, `date`, `STATE`, `HYD_AREA_new`, `HYD_AREA_N_new` | dropped | one arbitrary field's value (`first()`) |
 | `irr_eff`, `ITYPE`, `IRR_SRC`, `Acres`, `AWC`, `PAW_ft`, `ACRES_ALL` | dropped | sums of per-field attributes (e.g. `irr_eff` = 39.25) |
