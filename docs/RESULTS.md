@@ -140,5 +140,15 @@ that roster, by year and by HA. Annual totals are in `docs/tables/irrigated_area
 
 ## 7. Groundwater-ET subsidy and depth to water
 
-See [GW_SUBSIDY.md](GW_SUBSIDY.md) for the subsidy, the new DTW and its comparison with
-Ma et al.
+![Field subsidy](images/fig10_gw_subsidy_fields_new_vs_ma.png)
+
+**Fig. 10.** Subsidy by field with each depth-to-water product: bubble size = acre-ft/yr,
+color = share of the field's ETa.
+
+![HA subsidy](images/fig13_subsidy_ha_new_vs_ma.png)
+
+**Fig. 13.** HA subsidy under each product (log scale), the difference between them, the
+subsidy as a share of ETa, and the share of irrigated fields with a subsidy.
+
+[GW_SUBSIDY.md](GW_SUBSIDY.md) has the full subsidy method and the depth-to-water comparison
+with Ma et al. (Figs. 10–14).
