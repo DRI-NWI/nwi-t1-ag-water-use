@@ -5,7 +5,8 @@ All settings are in `config/nwi_t1_final.yaml`. The steps in `scripts/` run in o
 
 ## Fields
 
-- **Population.** 29,338 fields of the 2026-08-20 NWI boundary layer (24,882 NV; 2,361 CA;
+- **Population.** 29,338 fields of the 2026-08-20 NWI boundary layer,
+  `nevada_agricultural_field_boundaries_20260820.gpkg` (24,882 NV; 2,361 CA;
   1,509 UT; 275 ID; 274 OR; 37 AZ), monthly, 1985–2025.
 - **Hydrographic area.** Each field belongs to the HA in its boundary `Basin` attribute. HAs
   that cross the state line include their out-of-state fields.

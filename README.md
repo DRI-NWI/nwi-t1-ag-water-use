@@ -20,7 +20,7 @@ Run `nwi_t1_final_20261018`, configured by [`config/nwi_t1_final.yaml`](config/n
 
 | Component | Setting |
 |---|---|
-| Fields | 29,338 fields of the 2026-08-20 NWI boundary layer (24,882 NV; out-of-state fields in HAs that cross the state line) |
+| Fields | 29,338 fields of the 2026-08-20 NWI boundary layer, `nevada_agricultural_field_boundaries_20260820.gpkg` (24,882 NV; out-of-state fields in HAs that cross the state line) |
 | Water rights | NDWR place-of-use source per field: GW, SW or mixed. Fields outside Nevada are treated as GW. Diamond Valley (153) mixed fields count as GW |
 | ET | OpenET ensemble monthly ETa. EToF gaps are filled linearly for one month, otherwise from per-field climatologies over seven windows spanning 1985–2025 |
 | Precipitation | PRISM 800 m, daily at each field, summed by month |
