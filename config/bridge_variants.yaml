@@ -37,3 +37,10 @@ variants:
     etof: {climatology_fill: false}
   # Final: everything above plus the EToF climatology fill.
   v4_final: {}
+  # Comparison, not part of the bridge: precipitation from 4 km gridMET instead of PRISM 800 m,
+  # everything else as the final run. Monthly precipitation is the OpenET export's (gridMET);
+  # OTTER is rerun with each field's gridMET cell daily precipitation (the ET-Demands files,
+  # Nevada fields, through 2023). Run run_nv_otter_prism_monthly.py --variant first.
+  v5_gridmet_otter_peff:
+    precipitation: {source: export}
+    effective_precipitation: {otter: {precip: gridmet, end_year: 2023}}

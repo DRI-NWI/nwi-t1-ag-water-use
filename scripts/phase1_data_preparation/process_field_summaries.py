@@ -1448,7 +1448,10 @@ def process_field_summaries(cfg, paths, spi_data, output_dir, summary_dir, write
         combined_df = merge_prism_precipitation(combined_df, paths.prism_monthly)
     if cfg['effective_precipitation']['source'] == 'otter':
         print("NWI T1: replacing 0.85 x PPT with OTTER effective precipitation...")
-        combined_df = merge_otter_effective_precipitation(combined_df, paths.otter_monthly)
+        # NWI T1 (gridMET OTTER comparison): the v5 variant reads its own gridMET OTTER run
+        otter_path = (paths.variants / cfg['_variant'] / 'field_monthly_otter_peff.parquet'
+                      if cfg['effective_precipitation']['otter'].get('precip', 'prism') == 'gridmet' else paths.otter_monthly)
+        combined_df = merge_otter_effective_precipitation(combined_df, otter_path)
     else:
         combined_df['peff_method'] = 'export_085'
     combined_df = merge_county_assignment(combined_df, inputs['county_assignment'])

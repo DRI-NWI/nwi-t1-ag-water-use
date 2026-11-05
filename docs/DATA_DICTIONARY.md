@@ -1,15 +1,19 @@
 # Data dictionary
 
-For what each column replaces in the earlier packages (kept, changed, added or dropped, with
-reasons), see [legacy/COLUMN_CROSSWALK.md](legacy/COLUMN_CROSSWALK.md).
+For how each column compares with the files delivered on 2026-08-23 (field and HA) and
+2026-09-02 (county), whether kept, changed, added or dropped and why, see
+[legacy/COLUMN_CROSSWALK.md](legacy/COLUMN_CROSSWALK.md).
 
 The files are written under `<output_root>/<run_id>/`. File and column names follow the
 original agricultural-water-forecasting outputs. Volumes are in acre-ft, depths in ft
-unless marked mm, and areas in acres. "Field-month" is one field in one calendar month.
+unless marked mm, and areas in acres. A "field-month" is one field in one calendar month.
+Terms (ETa, ETo, EToF, effective precipitation, net ET, HA, GW, SW, mixed) are defined at the
+top of [METHODS.md](METHODS.md).
 
 ## Field files: `05_field_summaries/field_summaries_EToF_final{,_GW,_SW}.{csv,parquet}`
 
-Every field and every month, 1985–2025, with no irrigation filter.
+Every field and every month, 1985–2025, irrigated or not. `%_IRRIGATED` gives each field's
+irrigation status for filtering.
 
 | File | What each row is |
 |---|---|
@@ -22,7 +26,8 @@ by its share for that year. GW + SW = whole field for every volume.
 
 ### Which values to use
 
-Every ET value in the field files is gap-filled; the raw export values are not written.
+Every ET value in the field files is gap-filled; the OpenET values as exported, with their
+gaps, are not written.
 
 | Use | Columns |
 |---|---|
@@ -44,11 +49,11 @@ field-months have no observed ETa to fill from (`unfilled_missing`) and stay mis
 | `GRIDMET_ID` | gridMET cell of the field |
 | `IRR_SRC` | Water-right source used for allocation: 1 GW, 2 SW, 3 mixed |
 | `IRR_SRC_ORIGINAL` | Source before basin rules |
-| `IRR_SRC_ASSUMED` | True where the boundary layer has no source (non-Nevada fields); `IRR_SRC` = GW |
+| `IRR_SRC_ASSUMED` | True where the boundary layer has no water-right source (fields outside Nevada); these fields are treated as GW |
 | `IRR_SRC_OVERRIDE` | Basin rule applied to the field, if any (e.g. "basin 153: mixed->GW") |
 | `irr_eff` | Irrigation efficiency (fraction) |
 | `ITYPE` | Irrigation type code |
-| `CROP_major` | Dominant CDL crop code |
+| `CROP_major` | Dominant crop code of the field (USDA Cropland Data Layer), from the boundary layer |
 
 ### Time and allocation
 
@@ -56,34 +61,34 @@ field-months have no observed ETa to fill from (`unfilled_missing`) and stay mis
 |---|---|
 | `YEAR`, `MONTH`, `DATE` | Calendar year, month, first day of month |
 | `water_source` | Whole-field file: `GW`, `SW`, `mixed`. GW/SW files: `GW`, `SW`, `GW_from_mixed`, `SW_from_mixed` |
-| `allocation_method` | `pure_gw`, `pure_sw`, `default_fallback` (dynamic SPI 50/50), or a basin rule name |
+| `allocation_method` | `pure_gw`, `pure_sw`, `default_fallback` (mixed field split by the SPI rule centered on 0.5), or the name of a basin rule |
 | `allocation_ratio` | Share of the field in this file (1 in the whole-field file) |
-| `spi_value` | Sept SPI-12 used for the year (mixed fields only) |
-| `spi_source` | `prism_contributing_area` or `prism_ha` |
+| `spi_value` | 12-month SPI ending in September, used for the year's split (mixed fields only) |
+| `spi_source` | Area the SPI precipitation was averaged over: `prism_contributing_area` (area draining surface water to the HA) or `prism_ha` (the HA) |
 
 ### Area and monthly depths
 
 | Column | Unit | Description |
 |---|---|---|
-| `ACRES_FTR_GEOM` | acres | Field area (component share in GW/SW) |
-| `ACRES_IRR` | acres | IrrMapper irrigated area of the field that year (component share in GW/SW) |
+| `ACRES_FTR_GEOM` | acres | Field area (in the GW and SW files, multiplied by the field's share) |
+| `ACRES_IRR` | acres | IrrMapper irrigated area of the field that year (in the GW and SW files, multiplied by the field's share) |
 | `%_IRRIGATED` | fraction | IrrMapper irrigated fraction of the field that year (constant within a year) |
-| `ETO_MM` | mm | Reference ET (OpenET gridMET) |
+| `ETO_MM` | mm | Reference ET (ETo) from OpenET gridMET |
 | `ETA_MM` | mm | OpenET ensemble ETa, gap-filled (same as `ETA_MM_post_interp`) |
 | `EToF_interpolated` | – | ETa / ETo, gap-filled |
 | `interpolation_method` | – | `original`, `linear_1month`, `climatology`, `unfilled_missing` |
 | `ETA_MM_post_interp` | mm | EToF_interpolated × ETO_MM |
 | `PPT_MM` | mm | PRISM 800 m precipitation |
 | `EFF_PPT_MM` | mm | Effective precipitation: OTTER per field |
-| `peff_method` | – | `otter`, or `ppt_085_fallback` (0.85 × PPT) for the 242 fields without OTTER soils |
+| `peff_method` | – | `otter`, or `ppt_085_fallback` (0.85 × precipitation) for the 242 fields without OTTER soil inputs |
 
 ### Groundwater and soil
 
 | Column | Unit | Description |
 |---|---|---|
-| `gw_frac` | fraction | Groundwater-ET fraction f of the field (Tan et al. 2025, parity DTW) |
+| `gw_frac` | fraction | f: fraction of the field's ETa that groundwater can supply (Tan et al. 2025), from the new depth-to-groundwater map `nv_dtw_parity_statewide_100m` |
 | `AWC` | fraction | Available water capacity (volume of water per volume of soil) |
-| `PAW_ft` | ft | Plant-available water: AWC × 1.5 m rooting depth |
+| `PAW_ft` | ft | Plant-available water: AWC × 1.5 m root zone |
 
 ### Volumes (acre-ft)
 
@@ -95,12 +100,12 @@ field-months have no observed ETa to fill from (`unfilled_missing`) and stay mis
 | `NetET_pre_subsidy_acre_ft` | ETa − effective precipitation |
 | `GW_subsidy_potential_acre_ft` | f × ETa |
 | `GW_subsidy_acre_ft` | min(f × ETa, max(NetET_pre_subsidy, 0)) |
-| `NetET_vol_intermediate_acre_ft` | NetET_pre_subsidy − GW_subsidy; the net ET entering carry-forward |
+| `NetET_vol_intermediate_acre_ft` | NetET_pre_subsidy − GW_subsidy; the net ET before stored soil water is used |
 | `Soil_Moisture_Cap_acre_ft` | Storage cap: PAW × acres |
-| `Water_Surplus_Cumulative_acre_ft` | Stored soil water at month end (a state, not a flux) |
-| `Soil_Moisture_Overflow_acre_ft` | Surplus beyond the cap |
+| `Water_Surplus_Cumulative_acre_ft` | Soil water in storage at the end of the month (an amount on hand, not a flow during the month) |
+| `Soil_Moisture_Overflow_acre_ft` | Surplus above the storage cap, not stored |
 | `Carryforward_Used_acre_ft` | Stored water used this month: max(NetET_vol_intermediate, 0) − NetET_final |
-| `NetET_final_acre_ft` | Net ET after the subsidy and carry-forward (≥ 0) |
+| `NetET_final_acre_ft` | Net ET after the subsidy and stored soil water (never below 0) |
 | `AR_final_acre_ft` | Applied water: NetET_final / irr_eff |
 
 ### Depths (ft)
@@ -132,25 +137,25 @@ Each row is one Nevada county × year × month, for Nevada fields in irrigated f
 | Column | Rule |
 |---|---|
 | `ACRES_FTR_GEOM`, `ACRES_IRR` | Sum of field acres in that month. For annual acres, take the mean over months |
-| All `*_acre_ft` volumes listed above | Sum. `Soil_Moisture_Cap` and `Water_Surplus_Cumulative` are states: sum across fields, never across months |
+| All `*_acre_ft` volumes listed above | Sum. `Soil_Moisture_Cap` and `Water_Surplus_Cumulative` are amounts on hand at month end: add them across fields, never across months |
 | `field_count`, `num_fields_irrigated` | Number of field rows (the same value) |
 | `is_gw_field`, `is_sw_field`, `is_mixed_field` | Number of field rows by source |
 | `percent_gw_fields`, `percent_sw_fields` | % of all fields in the HA or county, with mixed fields counted by their share; same values in the whole-field, GW and SW files |
-| `n_fields_irr_src_assumed`, `n_fields_eta_interpolated`, `n_fields_eta_climatology`, `n_fields_eta_missing`, `n_fields_peff_fallback`, `n_fields_gw_subsidy` | Number of field rows with that flag (`gw_frac` > 0 for the last) |
+| `n_fields_irr_src_assumed`, `n_fields_eta_interpolated`, `n_fields_eta_climatology`, `n_fields_eta_missing`, `n_fields_peff_fallback`, `n_fields_gw_subsidy` | Number of field rows where, respectively: the water-right source is assumed GW; ETa was filled by interpolation; ETa was filled from the calendar-month average; ETa is missing; effective precipitation is 0.85 × precipitation; `gw_frac` > 0 |
 | `ETO_MM`, `PPT_MM`, `EFF_PPT_MM` | Acre-weighted mean (mm) |
 | `ETa_final_ft`, `NetET_final_ft`, `AR_final_ft`, `PPT_final_ft`, `GW_subsidy_ft` | Summed volume ÷ summed acres |
 | `irr_eff_effective` | NetET_final ÷ AR_final |
 | `pct_acres_missing_eta` | % of acres with no ETa that month |
-| `mixed_sw_ratio`, `spi_sept12`, `spi_source`, `allocation_method` | HA files only: the basin-year allocation of mixed fields (blank where the HA has no mixed fields) |
+| `mixed_sw_ratio`, `spi_sept12`, `spi_source`, `allocation_method` | HA files only: the SW share of mixed fields in that HA and year, the September 12-month SPI, where its precipitation was averaged, and the rule used (blank where the HA has no mixed fields) |
 
 ## Other run files
 
 | File | Content |
 |---|---|
 | `06_summaries/dynamic_allocation_stats.csv` | Mixed-field SW share, SPI, rule, fields and acres per HA and year |
-| `06_summaries/statewide_annual_totals.csv` | Annual volumes for each component (`component`) and population (`population`: `all_field_months`, `irrigated_field_months`) |
-| `06_summaries/run_checks.json` | Run settings, GW + SW = whole field closure, flag counts |
-| `06_summaries/field_attribute_enrichment_report.csv` | Boundary-attribute join and missing-attribute fallbacks |
+| `06_summaries/statewide_annual_totals.csv` | Annual statewide volumes for the whole field, GW and SW (`component`), for all field-months and for irrigated fields only (`population`: `all_field_months`, `irrigated_field_months`) |
+| `06_summaries/run_checks.json` | Run settings, the check that GW + SW equals the whole field, the number of fields by effective-precipitation method, and the number of field-months by ETa gap-filling method |
+| `06_summaries/field_attribute_enrichment_report.csv` | How the boundary-layer attributes were matched to the field-months by `NWI_ID`, how many rows got each attribute, and how many rows got a default because the attribute was missing (water-right source set to GW for the 4,451 fields outside Nevada) |
 | `03_spi/basin_spi_prism.csv` | SPI per basin and month, with its precipitation source |
-| `04_gw_subsidy/field_params.parquet` | Per-field DTW, texture, crop, Tan parameters and f (`gw_frac`) |
+| `04_gw_subsidy/field_params.parquet` | Per field: depth to groundwater, soil texture, crop, the Tan et al. depths and exponent (d_dec, d_ext, p) and f (`gw_frac`) |
 | `02_otter/field_monthly_otter_peff.parquet` | Monthly OTTER effective precipitation per field |

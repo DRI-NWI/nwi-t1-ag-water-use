@@ -9,6 +9,9 @@ $PY fig02_ha_maps.py
 $PY fig05_statewide_timeseries.py
 $PY fig07_allocation.py
 $PY fig08_data_quality.py
+$PY fig15_precip_prism_vs_gridmet.py
+# Needs the gridMET comparison run first (see figures/README.md)
+$PY fig16_otter_prism_vs_gridmet.py
 $PY fig09_irrigated_area.py
 $PY_EXACT prep_ma_dtw_zonal.py
 $PY fig10_gw_subsidy_dtw.py

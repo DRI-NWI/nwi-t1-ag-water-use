@@ -307,6 +307,53 @@ def stage_climate(met_dir: Path, field_order: list[str], valid_mask: np.ndarray,
     return pr_path, eto_path
 
 
+# NWI T1 (gridMET OTTER comparison): cells whose ET-Demands file is replaced by a neighbour, as in
+# the original ET-Demands staging.
+GRIDMET_REPLACEMENTS = {439582: 438196, 447900: 449286, 497780: 497779, 508870: 508869}
+
+
+def gridmet_cells(fields_gpkg: Path, climate_dir: Path) -> pd.Series:
+    """
+    NWI T1 (gridMET OTTER comparison): the gridMET cell file each field reads.
+
+    Parameters
+    ----------
+    fields_gpkg : Path
+        2026-08-20 NWI boundary layer (NWI_ID, GRIDMET_ID).
+    climate_dir : Path
+        Folder of gridmet_historical_<cell>.csv files.
+
+    Returns
+    -------
+    pd.Series
+        Source cell id by NWI_ID; NaN where no cell file exists (fields outside Nevada).
+    """
+    f = gpd.read_file(fields_gpkg, columns=[FIELD, "GRIDMET_ID"], ignore_geometry=True)
+    cell = pd.to_numeric(f["GRIDMET_ID"], errors="coerce").map(lambda g: GRIDMET_REPLACEMENTS.get(int(g), int(g)) if pd.notna(g) else np.nan)
+    have = {int(p.stem.split("_")[-1]) for p in Path(climate_dir).glob("gridmet_historical_*.csv")}
+    cell = cell.where(cell.isin(have))
+    return pd.Series(cell.to_numpy(), index=f[FIELD].astype(str))
+
+
+def stage_gridmet_precip(cells: pd.Series, climate_dir: Path, valid_order: list[str], dates: pd.DatetimeIndex, pr_path: Path) -> None:
+    """
+    NWI T1 (gridMET OTTER comparison): overwrite the staged daily precipitation with each
+    field's gridMET cell precipitation (prcp_mm). ETo stays as staged by stage_climate.
+    """
+    pr = np.memmap(pr_path, dtype="float32", mode="r+", shape=(len(dates), len(valid_order)))
+    col = cells.reindex(valid_order).astype(int)
+    for i, (cell, idx) in enumerate(pd.Series(np.arange(len(valid_order)), index=col.to_numpy()).groupby(level=0)):
+        t = pd.read_csv(Path(climate_dir) / f"gridmet_historical_{cell}.csv", usecols=["date", "prcp_mm"], parse_dates=["date"])
+        v = t.set_index("date")["prcp_mm"].reindex(dates)
+        if v.isna().any():
+            raise ValueError(f"Missing gridMET precipitation for cell {cell}")
+        pr[:, idx.to_numpy()] = v.to_numpy("float32")[:, None]
+        if i % 500 == 0:
+            print(f"Staged gridMET precipitation: {i:,} cells", flush=True)
+    pr.flush()
+    del pr
+
+
 def init_worker(pr_path: str, eto_path: str, shape: tuple[int, int], etof: np.ndarray, aws_u: np.ndarray, aws_max: np.ndarray, cn: np.ndarray, dates: np.ndarray, years: np.ndarray, start: int, init_dru: float, init_drl: float, mad: float, monthly_from: int) -> None:
     """Open the memmaps and share the static arrays with one worker process."""
     import sys
@@ -385,10 +432,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workers", type=int, default=max(1, int((os.cpu_count() or 2) * 0.8)))
     parser.add_argument("--chunk-fields", type=int, default=250)
+    # NWI T1 (gridMET OTTER comparison): a QA variant from config/bridge_variants.yaml
+    parser.add_argument("--variant", type=str, help="QA variant (v5_gridmet_otter_peff: gridMET precipitation)")
     args = parser.parse_args()
 
     # NWI T1: paths, years and NM05 parameters from config/nwi_t1_final.yaml
-    cfg = load_config()
+    cfg = load_config(variant=args.variant)
     paths = RunPaths(cfg).make()
     otter_cfg = cfg["effective_precipitation"]["otter"]
     start_year, end_year = cfg["run"]["start_year"], cfg["run"]["end_year"]
@@ -398,6 +447,13 @@ def main() -> None:
     MONTHLY_FROM = start_year
 
     out = paths.otter
+    # NWI T1 (gridMET OTTER comparison): gridMET precipitation, its own end year and output folder
+    precip = otter_cfg.get("precip", "prism")
+    otter_monthly, otter_audit = paths.otter_monthly, paths.otter_audit
+    if precip == "gridmet":
+        end_year = otter_cfg.get("end_year", end_year)
+        out = paths.variants / args.variant
+        otter_monthly, otter_audit = out / "field_monthly_otter_peff.parquet", out / "otter_static_audit.csv"
     staging = out / "staging"
     staging.mkdir(parents=True, exist_ok=True)
     years = list(range(start_year, end_year + 1))
@@ -406,14 +462,20 @@ def main() -> None:
     field_order = fields[FIELD].tolist()
     aws_u_all, aws_max_all, cn_all, bad_static, static_audit = load_static(
         Path(cfg["inputs"]["otter_static_soils"]), field_order, start_year, end_year)
-    static_audit.to_csv(paths.otter_audit, index=False)
+    static_audit.to_csv(otter_audit, index=False)
     valid_mask = ~bad_static
+    if precip == "gridmet":   # NWI T1 (gridMET OTTER comparison): only fields with a gridMET cell file
+        cells = gridmet_cells(Path(cfg["inputs"]["fields_gpkg"]), Path(cfg["inputs"]["gridmet_climate_dir"]))
+        valid_mask &= cells.reindex(field_order).notna().to_numpy()
     valid_order = [fid for fid, ok in zip(field_order, valid_mask) if ok]
     print("Building monthly EToF with the field processor's gap filling...", flush=True)
     etof_all = load_etof(build_monthly_etof(cfg, paths), field_order, start_year, end_year)
     valid_indices = np.flatnonzero(valid_mask)
     etof_valid = etof_all[valid_indices]
     pr_path, eto_path = stage_climate(Path(cfg["inputs"]["met_daily_dir"]), field_order, valid_mask, dates, staging)
+    if precip == "gridmet":
+        stage_gridmet_precip(cells, Path(cfg["inputs"]["gridmet_climate_dir"]),
+                             [fid for fid, ok in zip(field_order, valid_mask) if ok], dates, pr_path)
 
     # Restrict static arrays to the valid-field order used by the memmaps.
     aws_u = aws_u_all[valid_indices]
@@ -442,8 +504,8 @@ def main() -> None:
     monthly = pd.concat(results, ignore_index=True)
     monthly[FIELD] = monthly["_FIELD_INDEX"].map(dict(enumerate(valid_order))).astype(str)
     monthly = monthly.drop(columns=["_FIELD_INDEX"]).sort_values([FIELD, "YEAR", "MONTH"])
-    monthly.to_parquet(paths.otter_monthly, index=False)
-    print(f"wrote {len(monthly):,} monthly rows to {paths.otter_monthly}")
+    monthly.to_parquet(otter_monthly, index=False)
+    print(f"wrote {len(monthly):,} monthly rows to {otter_monthly}")
 
 
 if __name__ == "__main__":

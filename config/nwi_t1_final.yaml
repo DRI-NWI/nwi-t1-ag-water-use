@@ -21,6 +21,9 @@ inputs:
   # Daily PRISM 800 m precipitation (field centroid) and OpenET gridMET ETo,
   # extracted with ee_extract_nv_20260820.toml (project nasa-water).
   met_daily_dir: /Users/Peter.ReVelle@dri.edu/github/agricultural-water-forecasting/scripts/scripts_otter/data_folder/nwi_field_export_20260820/met
+  # Daily gridMET cell files (date, prcp_mm, eto_mm) read by ET-Demands; used only by the
+  # gridMET OTTER comparison (QA variant v5_gridmet_otter_peff). They end in April 2024.
+  gridmet_climate_dir: /Users/Peter.ReVelle@dri.edu/Documents/projects/etdemands/nwi/climate_data
   otter_static_soils: /Users/Peter.ReVelle@dri.edu/github/agricultural-water-forecasting/outputs/nv_otter_20260917/soil_reextract_nm_20260918/soils_otter_static_nm_base_fill.parquet
   awc_table: /Users/Peter.ReVelle@dri.edu/github/agricultural-water-forecasting/data/openet/nwi_field_summaries_20260820/awc_extraction/otter_awc_august_merged.csv
   # PRISM monthly precipitation over each HA and each SW contributing area (1981-2025).

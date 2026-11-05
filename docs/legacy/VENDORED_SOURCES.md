@@ -1,8 +1,8 @@
 # Code sources
 
-The scripts in `scripts/` are copies of the original scripts, edited in place. The first
-copy is committed unmodified (commit 9b60d5d, "Add original scripts, unmodified"). Every
-later change is marked `# NWI T1` in the code, so this command shows each edit:
+The scripts in `scripts/` are copies of the original scripts, edited in place. The copies
+were first committed unchanged (commit 9b60d5d, "Add original scripts, unmodified"). Every
+later change is marked `# NWI T1` in the code, and this command shows each edit:
 
     git diff 9b60d5d -- scripts/
 
@@ -10,21 +10,21 @@ Sources and versions: [../../scripts/ORIGINAL_SOURCES.md](../../scripts/ORIGINAL
 
 ## Three steps made faster in process_field_summaries.py
 
-Each faster version is checked against a verbatim copy of the original function
-(`tests/original_reference.py`) by `tests/test_fast_equivalence.py`.
+`tests/test_fast_equivalence.py` checks that each faster version gives the same result as an
+exact copy of the original function (`tests/original_reference.py`).
 
 | Step | Original | Faster version |
 |---|---|---|
-| Winter carry-forward | Python loop over every field-month | The same loop compiled with numba (`_carryforward_recurrence`) |
-| EToF climatology fill | Row-by-row lookup (`iterrows`) | One table join, with the same window, field, HA and month rules |
-| SW/GW split of mixed fields | Copies the rows of every basin-year | Computes the same basin-year ratios, then splits all rows with one join |
+| Winter carry-forward | Python loop over every field-month | The same loop, compiled to machine code with the `numba` package (`_carryforward_recurrence`) |
+| Filling gaps from the field's calendar-month average EToF | Looks up each missing row one at a time | Matches all missing rows to the averages in one table merge, by the same period, field, HA and month |
+| GW/SW split of mixed fields | Copies the rows of each HA and year separately | Computes the same SW share for each HA and year, then splits all rows in one table merge |
 
 ## Fixes to the original behavior
 
 | Fix | Where |
 |---|---|
-| Dynamic basin rules (Fish Lake Valley 117) were read with `load_config()` and no arguments, so they never applied in NWI runs; they now come from the run config | `process_field_summaries.py` |
-| Climatologies were never built for the parquet export (the existence check looked for `etrf_` files and the builder read only CSV) | `calculate_field_climatologies.py`, `process_field_summaries.py` |
-| `ACRES_IRR` was not split for mixed fields, so both GW and SW halves carried the full value | `apply_gw_sw_separation_dynamic` |
-| HA/county summaries summed every numeric column and took `first()` of text columns | `aggregate_summaries` |
-| Carry-forward indexed rows by their position in the date-sorted frame, which is only right when the input is already sorted | `apply_winter_moisture_carryforward` |
+| The Fish Lake Valley (117) rule was read with `load_config()` and no arguments, which loads the default settings instead of the NWI run's, so it never applied in NWI runs; it now comes from the run config | `process_field_summaries.py` |
+| The calendar-month EToF averages were never built for the OpenET export in parquet format: the check for existing averages looked for files named `etrf_`, and the builder read only CSV | `calculate_field_climatologies.py`, `process_field_summaries.py` |
+| `ACRES_IRR` was not multiplied by the share for mixed fields, so both the GW and the SW rows carried the field's full irrigated acres | `apply_gw_sw_separation_dynamic` |
+| HA and county summaries added up every numeric column and took the first field's value for text columns | `aggregate_summaries` |
+| The carry-forward wrote results back by row position after sorting by date, which is only right when the input was already sorted that way | `apply_winter_moisture_carryforward` |
