@@ -618,36 +618,33 @@ function fCurveChart(p, m) {
   return ui.Chart({cols: cols, rows: rows}, 'LineChart', {
     title: MODEL_LABEL[key] + ': f against depth for this field', height: 200,
     hAxis: {title: 'Depth to water (m)'}, vAxis: {title: 'f', viewWindow: {min: 0, max: 1}},
-    series: {0: {color: '#1d91c0'}, 1: {color: '#999999', lineDashStyle: [4, 3]},
-             2: {color: '#08306b', lineWidth: 2}, 3: {color: '#b35806', lineWidth: 2}},
+    series: {0: {color: '#52514e'}, 1: {color: '#999999', lineDashStyle: [4, 3]},
+             2: {color: '#2a78d6', lineWidth: 2}, 3: {color: '#eb6834', lineWidth: 2}},
     interpolateNulls: false, legend: {position: 'bottom'}, chartArea: {width: '80%'}
   });
 }
 
-// Annual subsidy, new vs Ma, for the selected model; ETa on the right axis.
+// Annual subsidy, new vs Ma, for the selected model (one axis; the field's ETa is in the text above).
 function addFieldYearChart(p, m) {
   var note = small('Loading the 41 years...');
   infoPanel.add(note);
   fieldYears.filter(ee.Filter.eq('NWI_ID', p.NWI_ID)).sort('YEAR')
-    .reduceColumns(ee.Reducer.toList().repeat(5), ['YEAR', 'IRR', 'ETA_AF', 'S_NEW_' + m, 'S_MA_' + m])
+    .reduceColumns(ee.Reducer.toList().repeat(4), ['YEAR', 'IRR', 'S_NEW_' + m, 'S_MA_' + m])
     .get('list').evaluate(function (L, err) {
       infoPanel.remove(note);
       if (err || !L) { infoPanel.add(small('Annual query failed: ' + err)); return; }
       var cols = [{id: 'y', label: 'Year', type: 'number'},
-                  {id: 'n', label: 'Subsidy, new DTW', type: 'number'},
-                  {id: 'm', label: 'Subsidy, Ma et al.', type: 'number'},
-                  {id: 'e', label: 'ETa (right axis)', type: 'number'}];
+                  {id: 'n', label: 'New DTW', type: 'number'},
+                  {id: 'm', label: 'Ma et al.', type: 'number'}];
       var rows = L[0].map(function (y, i) {
         var irr = L[1][i] === 1;
-        return {c: [{v: y}, {v: irr ? L[3][i] : null}, {v: irr ? L[4][i] : null}, {v: L[2][i]}]};
+        return {c: [{v: y}, {v: irr ? L[2][i] : null}, {v: irr ? L[3][i] : null}]};
       });
       infoPanel.add(ui.Chart({cols: cols, rows: rows}, 'LineChart', {
         title: 'Annual subsidy, ' + MODEL_LABEL[m] + ' (acre-ft; gaps = not irrigated)', height: 210,
-        hAxis: {title: 'Year', format: '####'}, vAxes: {0: {title: 'subsidy (acre-ft)'}, 1: {title: 'ETa (acre-ft)'}},
-        series: {0: {color: '#08306b', pointSize: 3, targetAxisIndex: 0},
-                 1: {color: '#b35806', pointSize: 3, targetAxisIndex: 0},
-                 2: {color: '#bbbbbb', lineWidth: 1, targetAxisIndex: 1}},
-        interpolateNulls: false, legend: {position: 'bottom'}, chartArea: {width: '75%'}
+        hAxis: {title: 'Year', format: '####'}, vAxis: {title: 'acre-ft', viewWindow: {min: 0}},
+        series: {0: {color: '#2a78d6', pointSize: 3}, 1: {color: '#eb6834', pointSize: 3}},
+        interpolateNulls: false, legend: {position: 'bottom'}, chartArea: {width: '78%'}
       }));
     });
 }
@@ -696,7 +693,7 @@ function addHaYearChart(p, m) {
       L[0].forEach(function (y, i) { data.push([y, L[1][i], L[2][i]]); });
       infoPanel.add(ui.Chart(data, 'LineChart', {
         title: 'Annual subsidy, irrigated fields, ' + MODEL_LABEL[m] + ' (acre-ft)', height: 200,
-        hAxis: {format: '####'}, series: {0: {color: '#08306b'}, 1: {color: '#b35806'}},
+        hAxis: {format: '####'}, series: {0: {color: '#2a78d6'}, 1: {color: '#eb6834'}},
         legend: {position: 'bottom'}, chartArea: {width: '78%'}
       }));
     });
