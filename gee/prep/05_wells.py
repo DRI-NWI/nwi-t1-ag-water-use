@@ -4,9 +4,12 @@ GEE app input 5: wells, and each field's distance to them.
 
 Training wells (the "well data" of the app): the wells the handily NV parity DTW model was
 trained on, gs://ucrc-wtd/handily/nv/handily_wells_train_nv_parity.csv (9,448 wells: 8,628 NDWR
-well-log depths and 820 monitoring wells). The file is dated 2026-10-21; the run's DTW map is the
-2026-10-08 build, so the script checks that this map honours these wells (map minus well depth at
-the training wells versus at other wells) before they are used.
+well-log depths and 820 monitoring wells), dated 2026-10-21 like the new 30 m map. The script
+records how closely the new map and the run's 2026-10-08 map honour these wells (map minus well
+depth at the training wells versus at other wells).
+
+Each well gets the value of every map at its pixel: dtw_new_m (new map, 30 m), dtw_run_m (the run's
+map, 100 m), dtw_ma_m (Ma et al. on the 30 m grid) and dtw_sigma_m (the run's map's sigma, 100 m).
 
 All wells (context): the gwx Nevada well set shipped with the DTW map (gwx_nevada_wells.zip,
 MD5 e06c9fe9ea211b438bf2722c523ea459), every well with a measured depth to water (mean_dtw).
@@ -81,10 +84,12 @@ def main():
                          geometry=gpd.points_from_xy(t["longitude"], t["latitude"]), crs=4326)
     assert t["canonical_id"].is_unique
     t5070 = t.to_crs(5070)
-    t["dtw_new_m"] = sample(rdir / "dtw_new_100m_epsg5070.tif", t5070.geometry)
-    t["dtw_ma_m"] = sample(rdir / "dtw_ma_100m_epsg5070.tif", t5070.geometry)
+    t["dtw_new_m"] = sample(rdir / "dtw_new_30m_epsg5070.tif", t5070.geometry)
+    t["dtw_run_m"] = sample(rdir / "dtw_run_100m_epsg5070.tif", t5070.geometry)
+    t["dtw_ma_m"] = sample(rdir / "dtw_ma_30m_epsg5070.tif", t5070.geometry)
     t["dtw_sigma_m"] = sample(rdir / "dtw_sigma_100m_epsg5070.tif", t5070.geometry)
     t["new_minus_well_m"] = t["dtw_new_m"] - t["dtw_m"]
+    t["run_minus_well_m"] = t["dtw_run_m"] - t["dtw_m"]
     t["ma_minus_well_m"] = t["dtw_ma_m"] - t["dtw_m"]
     t.to_parquet(out / "wells_train.parquet", index=False)
 
@@ -100,23 +105,26 @@ def main():
     near = gpd.sjoin_nearest(g5070[["row_id", "geometry"]], t5070[["geometry"]], how="left",
                              distance_col="d", max_distance=2.0)
     g["is_train"] = near.drop_duplicates("row_id").set_index("row_id")["d"].reindex(g["row_id"]).notna().to_numpy()
-    g["dtw_new_m"] = sample(rdir / "dtw_new_100m_epsg5070.tif", g5070.geometry)
+    g["dtw_new_m"] = sample(rdir / "dtw_new_30m_epsg5070.tif", g5070.geometry)
+    g["dtw_run_m"] = sample(rdir / "dtw_run_100m_epsg5070.tif", g5070.geometry)
     g["new_minus_well_m"] = g["dtw_new_m"] - g["mean_dtw"]
+    g["run_minus_well_m"] = g["dtw_run_m"] - g["mean_dtw"]
     g.to_parquet(out / "wells_gwx_nv.parquet", index=False)
 
-    # Does the 2026-10-08 map honour this training set? Compare |map - well| at training wells
+    # How closely does each map honour this training set? Compare |map - well| at training wells
     # with the same statistic at gwx wells that are not in the training set.
-    a_tr = t["new_minus_well_m"].abs().dropna()
-    a_ot = g.loc[~g["is_train"], "new_minus_well_m"].abs().dropna()
-    checks.update({"n_train": len(t), "n_train_in_map": int(a_tr.size), "train_abs_resid_median_m": float(a_tr.median()),
-                   "train_abs_resid_p90_m": float(a_tr.quantile(0.9)), "n_other_gwx": int(a_ot.size),
-                   "other_abs_resid_median_m": float(a_ot.median()), "other_abs_resid_p90_m": float(a_ot.quantile(0.9)),
-                   "n_gwx_flagged_train": int(g["is_train"].sum())})
+    checks.update({"n_train": len(t), "n_other_gwx": int((~g["is_train"]).sum()), "n_gwx_flagged_train": int(g["is_train"].sum())})
     print(f"[wells] {len(t):,} training wells ({(t['source'] == 'nv_ndwr').sum():,} NDWR, "
           f"{(t['source'] != 'nv_ndwr').sum():,} monitoring); {len(g):,} gwx wells with mean_dtw, "
           f"{g['is_train'].sum():,} of them at a training-well location")
-    print(f"[wells] |new map - well DTW|: training wells median {a_tr.median():.2f} m (p90 {a_tr.quantile(.9):.2f}); "
-          f"other gwx wells median {a_ot.median():.2f} m (p90 {a_ot.quantile(.9):.2f})")
+    for tag, label in (("new", "new map (30 m)"), ("run", "run's map (100 m)")):
+        a_tr = t[f"{tag}_minus_well_m"].abs().dropna()
+        a_ot = g.loc[~g["is_train"], f"{tag}_minus_well_m"].abs().dropna()
+        checks[tag] = {"n_train_in_map": int(a_tr.size), "train_abs_resid_median_m": float(a_tr.median()),
+                       "train_abs_resid_p90_m": float(a_tr.quantile(0.9)), "other_abs_resid_median_m": float(a_ot.median()),
+                       "other_abs_resid_p90_m": float(a_ot.quantile(0.9))}
+        print(f"[wells] |{label} - well DTW|: training wells median {a_tr.median():.2f} m (p90 {a_tr.quantile(.9):.2f}); "
+              f"other gwx wells median {a_ot.median():.2f} m (p90 {a_ot.quantile(.9):.2f})")
 
     # ---- per-field distances ----------------------------------------------------------------------
     f = gpd.read_parquet(out / "fields_20260820.parquet")[["NWI_ID", "geometry"]].to_crs(5070)

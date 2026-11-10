@@ -10,10 +10,11 @@
 // fraction of ETa groundwater can supply (Tan et al. 2025 in the run). Values are 1985-2025 annual
 // means over irrigated field-years (IrrMapper > 50% of the field), acre-ft/yr, as in the report.
 //
-//   * Tan et al. with the new DTW: the run's values (gw_frac and GW_subsidy_acre_ft in the run's
-//     field files). They reproduce README.md and docs/tables/ha_gw_subsidy_new_vs_ma.csv exactly.
-//   * Banta, Averianov, Shah, and every model with Ma et al.: recomputed with the run's code
-//     (scripts/gw_subsidy) on the same 2026-08-20 fields; see gee/README.md for how close they are.
+//   * New DTW: the handily NV parity map at 30 m (gs://ucrc-wtd/handily/nv/handily_dtw_nv_parity_30m.tif,
+//     2026-10-21). f and subsidy for every model with it, and with Ma et al. on the same 30 m grid, are
+//     computed with the run's code (scripts/gw_subsidy) on the same 2026-08-20 fields.
+//   * The run's own Tan values (F_RUN_TAN, S_RUN_TAN) were made with its 2026-10-08 100 m map. They
+//     reproduce README.md and docs/tables/ha_gw_subsidy_new_vs_ma.csv exactly and are shown for reference.
 //
 // Tables and rasters are built by gee/prep/ (01-07) and checked by gee/prep/08_check_assets.py.
 // This file was first copied unchanged from
@@ -31,12 +32,13 @@ var ASSET = {
   haYears:    ROOT + 'ha_year_gw_subsidy_20261018',     // one row per HA-year
   wellsTrain: ROOT + 'wells_handily_train_nv',          // wells the new DTW map was trained on
   wellsAll:   ROOT + 'wells_gwx_nv',                    // all gwx wells with a depth to water
-  dtw:        ROOT + 'dtw_100m_epsg5070'                // bands dtw_new_m, dtw_sigma_m, dtw_ma_m
+  dtw:        ROOT + 'dtw_epsg5070'                     // dtw_new_m, dtw_ma_m (30 m); dtw_sigma_m, dtw_run_m (100 m)
 };
 var YEAR_MIN = 1985;
 var YEAR_MAX = 2025;
 
-// Report values the checks panel compares against (README.md, docs/GW_SUBSIDY.md, Fig. 11).
+// Report values the checks panel compares against (README.md, docs/GW_SUBSIDY.md, Fig. 11). The report
+// used the run's 2026-10-08 map, so only the run's own values are expected to match exactly.
 var REPORT = {
   subsidyAll: 34733, etaAll: 1423458, nCovered: 16225, coveredNew: 24184, coveredMa: 18563,
   medianDtwNew: 7.2, medianDtwMa: 7.4
@@ -44,7 +46,7 @@ var REPORT = {
 
 // f(d) models. Tan is the run's model and the default.
 var MODELS = [
-  {key: 'TAN',   label: 'Tan et al. (2025): used in the run'},
+  {key: 'TAN',   label: 'Tan et al. (2025): the run\'s model'},
   {key: 'BANTA', label: 'Banta (2000) linear'},
   {key: 'AVER',  label: 'Averianov (1956), p = 3'},
   {key: 'SHAH',  label: 'Shah et al. (2007)'}
@@ -101,13 +103,19 @@ var FIELD_VARS = [
    prop: function () { return 'DTW_MA_M'; }},
   {key: 'dChg',   label: 'Field mean DTW change, new - Ma (m)', brk: BRK_DDTW, pal: PAL_DDTW,
    prop: function () { return 'DTW_D_M'; }},
-  {key: 'sig',    label: 'New DTW uncertainty, field mean sigma (m)', brk: BRK_SIG, pal: PAL_SIG,
+  {key: 'dRun',   label: 'Field mean DTW, run\'s 2026-10-08 map (m)', brk: BRK_DTW, pal: PAL_DTW,
+   prop: function () { return 'DTW_RUN_M'; }},
+  {key: 'dRunChg', label: 'Field mean DTW change, new - run\'s map (m)', brk: BRK_DDTW, pal: PAL_DDTW,
+   calc: function (ft) { return ee.Number(ft.get('DTW_NEW_M')).subtract(ee.Number(ft.get('DTW_RUN_M'))); }},
+  {key: 'sig',    label: 'DTW uncertainty, field mean sigma of the run\'s map (m)', brk: BRK_SIG, pal: PAL_SIG,
    prop: function () { return 'DTW_SIG_M'; }},
   {key: 'well',   label: 'Distance to nearest training well (km)', brk: BRK_DIST, pal: PAL_DIST,
    prop: function () { return 'WT_DIST_KM'; }},
-  {key: 'vsTan',  label: 'Model - Tan recomputed, new DTW (for Tan: run - recomputed) (acre-ft/yr)', brk: BRK_CHG, pal: PAL_DIV,
+  {key: 'vsRun',  label: 'Tan subsidy, new DTW - the run (report) (acre-ft/yr)', brk: BRK_CHG, pal: PAL_DIV,
+   calc: function (ft) { return ee.Number(ft.get('S_NEW_TAN')).subtract(ee.Number(ft.get('S_RUN_TAN'))); }},
+  {key: 'vsTan',  label: 'Model - Tan, new DTW (acre-ft/yr)', brk: BRK_CHG, pal: PAL_DIV,
    calc: function (ft, m) {
-     return ee.Number(ft.get('S_NEW_' + m)).subtract(ee.Number(ft.get('S_NEW_TANR')));
+     return ee.Number(ft.get('S_NEW_' + m)).subtract(ee.Number(ft.get('S_NEW_TAN')));
    }}
 ];
 var FIELD_VAR = {};
@@ -136,7 +144,7 @@ var dtw        = ee.Image(ASSET.dtw);
 
 // === GW-ET FRACTION f(d), per pixel (display layer) =============================
 // Same formulas as scripts/gw_subsidy/models.py. Field values are not computed here: they are
-// coverage-weighted means of f over each field's 100 m pixels, computed offline.
+// coverage-weighted means of f over each field's 30 m pixels, computed offline.
 function fImage(model, d, dDec, dExt, p) {
   if (model === 'BANTA') return ee.Image(1).subtract(d.divide(dExt)).clamp(0, 1);
   if (model === 'AVER') return ee.Image(1).subtract(d.divide(dExt)).clamp(0, 1).pow(AVERIANOV_P);
@@ -208,12 +216,13 @@ var state = {
   selected: null,
   layers: {
     'Fields (coloured)': true,
-    'DTW, new (handily 100 m)': false,
-    'DTW, Ma et al. (100 m)': false,
+    'DTW, new (handily 30 m)': false,
+    'DTW, Ma et al. (30 m grid)': false,
     'DTW change, new - Ma': false,
-    'DTW uncertainty, new (sigma)': false,
-    'f per 100 m pixel, new DTW': false,
-    'f per 100 m pixel, Ma et al.': false,
+    'DTW change, new - run\'s map': false,
+    'DTW uncertainty (sigma of the run\'s map)': false,
+    'f per 30 m pixel, new DTW': false,
+    'f per 30 m pixel, Ma et al.': false,
     'Distance to nearest training well': false,
     'Training wells (new DTW)': true,
     'All gwx wells with a depth to water': false,
@@ -273,9 +282,10 @@ leftPanel.add(ui.Label('NWI GW-ET Subsidy Explorer', {
   padding: '10px', margin: '0 0 4px 0', textAlign: 'center', stretch: 'horizontal'
 }));
 leftPanel.add(small(
-  'Internal check of the field groundwater-ET subsidy in run ' + RUN_ID + ' (2026-08-20 fields; ' +
-  'handily parity DTW, 100 m) against Ma et al. (2026). Values are 1985-2025 means over irrigated ' +
-  'field-years, acre-ft/yr. Click a field, a well or a hydrographic area (HA).', '#333'));
+  'Internal check of the field groundwater-ET subsidy in run ' + RUN_ID + ' (2026-08-20 fields). New DTW: ' +
+  'handily parity, 30 m (2026-10-21), against Ma et al. (2026) on the same grid, with the run\'s own values ' +
+  '(its 2026-10-08 map) for reference. Values are 1985-2025 means over irrigated field-years, acre-ft/yr. ' +
+  'Click a field, a well or a hydrographic area (HA).', '#333'));
 
 // --- model and colouring
 leftPanel.add(header('Model and map'));
@@ -291,8 +301,8 @@ var varSelect = ui.Select({
 });
 leftPanel.add(ui.Panel([ui.Label('Colour fields by', {margin: '6px 4px 0 0', fontSize: '12px'}), varSelect],
   ui.Panel.Layout.flow('horizontal'), {stretch: 'horizontal'}));
-leftPanel.add(small('Tan with the new DTW is the run\'s value; other models and every Ma et al. value ' +
-  'are recomputed with the run\'s code (see Notes).'));
+leftPanel.add(small('Every value with the new DTW and with Ma et al. is computed with the run\'s code; the run\'s ' +
+  'own Tan values (its 2026-10-08 map) are shown for reference (see Notes).'));
 
 // --- filters
 leftPanel.add(header('Which fields'));
@@ -392,8 +402,8 @@ ui.root.add(ui.SplitPanel({firstPanel: leftPanel, secondPanel: map, orientation:
 
 // === MAP LAYERS =================================================================
 
-var RASTER_LAYERS = ['DTW, new (handily 100 m)', 'DTW, Ma et al. (100 m)', 'DTW change, new - Ma',
-  'DTW uncertainty, new (sigma)', 'f per 100 m pixel, new DTW', 'f per 100 m pixel, Ma et al.',
+var RASTER_LAYERS = ['DTW, new (handily 30 m)', 'DTW, Ma et al. (30 m grid)', 'DTW change, new - Ma', 'DTW change, new - run\'s map',
+  'DTW uncertainty (sigma of the run\'s map)', 'f per 30 m pixel, new DTW', 'f per 30 m pixel, Ma et al.',
   'Distance to nearest training well'];
 
 function addClassLayer(img, brk, pal, name, opacity) {
@@ -405,18 +415,21 @@ function paintLayers() {
   var L = state.layers;
   var m = state.model;
   var o = state.opacity;
-  if (L['DTW, new (handily 100 m)']) addClassLayer(dtw.select('dtw_new_m'), BRK_DTW, PAL_DTW, 'DTW, new (handily 100 m)', o);
-  if (L['DTW, Ma et al. (100 m)']) addClassLayer(dtw.select('dtw_ma_m'), BRK_DTW, PAL_DTW, 'DTW, Ma et al. (100 m)', o);
+  if (L['DTW, new (handily 30 m)']) addClassLayer(dtw.select('dtw_new_m'), BRK_DTW, PAL_DTW, 'DTW, new (handily 30 m)', o);
+  if (L['DTW, Ma et al. (30 m grid)']) addClassLayer(dtw.select('dtw_ma_m'), BRK_DTW, PAL_DTW, 'DTW, Ma et al. (30 m grid)', o);
   if (L['DTW change, new - Ma']) {
     addClassLayer(dtw.select('dtw_new_m').subtract(dtw.select('dtw_ma_m')), BRK_DDTW, PAL_DDTW, 'DTW change, new - Ma', o);
   }
-  if (L['DTW uncertainty, new (sigma)']) addClassLayer(dtw.select('dtw_sigma_m'), BRK_SIG, PAL_SIG, 'DTW uncertainty, new (sigma)', o);
+  if (L['DTW change, new - run\'s map']) {
+    addClassLayer(dtw.select('dtw_new_m').subtract(dtw.select('dtw_run_m')), BRK_DDTW, PAL_DDTW, 'DTW change, new - run\'s map', o);
+  }
+  if (L['DTW uncertainty (sigma of the run\'s map)']) addClassLayer(dtw.select('dtw_sigma_m'), BRK_SIG, PAL_SIG, 'DTW uncertainty (sigma of the run\'s map)', o);
   if (L['Distance to nearest training well']) {
     var dist = wellsTrain.distance({searchRadius: 40000, maxError: 50}).divide(1000).clipToCollection(has);
     addClassLayer(dist, BRK_DIST, PAL_DIST, 'Distance to nearest training well', o);
   }
-  if (L['f per 100 m pixel, new DTW']) addClassLayer(fPixelLayer(m, 'new'), BRK_F, PAL_F, 'f per 100 m pixel, new DTW', o);
-  if (L['f per 100 m pixel, Ma et al.']) addClassLayer(fPixelLayer(m, 'ma'), BRK_F, PAL_F, 'f per 100 m pixel, Ma et al.', o);
+  if (L['f per 30 m pixel, new DTW']) addClassLayer(fPixelLayer(m, 'new'), BRK_F, PAL_F, 'f per 30 m pixel, new DTW', o);
+  if (L['f per 30 m pixel, Ma et al.']) addClassLayer(fPixelLayer(m, 'ma'), BRK_F, PAL_F, 'f per 30 m pixel, Ma et al.', o);
   if (L['HA change, new - Ma']) {
     var hv = has.filter(ee.Filter.gt('N_IRR', 0));
     addClassLayer(ee.Image().float().paint(hv, 'D_' + m), BRK_HA, PAL_DIV, 'HA change, new - Ma', 0.8);
@@ -489,11 +502,12 @@ function updateLegend() {
   var L = state.layers;
   var v = FIELD_VAR[state.fieldVar];
   if (L['Fields (coloured)']) legendPanel.add(classLegend('Fields: ' + v.label + ', ' + state.model, v.brk, v.pal));
-  if (L['DTW, new (handily 100 m)'] || L['DTW, Ma et al. (100 m)']) legendPanel.add(classLegend('DTW (m)', BRK_DTW, PAL_DTW));
+  if (L['DTW, new (handily 30 m)'] || L['DTW, Ma et al. (30 m grid)']) legendPanel.add(classLegend('DTW (m)', BRK_DTW, PAL_DTW));
   if (L['DTW change, new - Ma']) legendPanel.add(classLegend('DTW change, new - Ma (m; red = new deeper)', BRK_DDTW, PAL_DDTW));
-  if (L['DTW uncertainty, new (sigma)']) legendPanel.add(classLegend('DTW sigma (m)', BRK_SIG, PAL_SIG));
+  if (L['DTW change, new - run\'s map']) legendPanel.add(classLegend('DTW change, new - run\'s map (m; red = new deeper)', BRK_DDTW, PAL_DDTW));
+  if (L['DTW uncertainty (sigma of the run\'s map)']) legendPanel.add(classLegend('DTW sigma (m)', BRK_SIG, PAL_SIG));
   if (L['Distance to nearest training well']) legendPanel.add(classLegend('Distance to nearest training well (km)', BRK_DIST, PAL_DIST));
-  if (L['f per 100 m pixel, new DTW'] || L['f per 100 m pixel, Ma et al.']) legendPanel.add(classLegend('f per pixel', BRK_F, PAL_F));
+  if (L['f per 30 m pixel, new DTW'] || L['f per 30 m pixel, Ma et al.']) legendPanel.add(classLegend('f per pixel', BRK_F, PAL_F));
   if (L['HA change, new - Ma']) legendPanel.add(classLegend('HA change, new - Ma (acre-ft/yr)', BRK_HA, PAL_DIV));
   if (L['Training wells (new DTW)']) {
     legendPanel.add(swatch('33a6ff', 'Training well: NDWR well log'));
@@ -519,8 +533,8 @@ function updateSummary() {
       fmt(100 * s[1] / Math.max(s[3], 1e-9), 2) + '% of ETa ' + fmt(s[3]) + ').');
   });
   var cols = ['NWI_ID', 'STATE', 'HYD_AREA', 'HA_NAME', 'SRC', 'CROP_LBL', 'ACRES', 'N_IRR_YRS', 'ETA_AF',
-    'DTW_NEW_M', 'DTW_MA_M', 'DTW_SIG_M', 'WT_DIST_KM', 'WT_N5KM', 'F_NEW_' + m, 'F_MA_' + m,
-    'S_NEW_' + m, 'S_MA_' + m, 'D_' + m];
+    'DTW_NEW_M', 'DTW_MA_M', 'DTW_RUN_M', 'DTW_SIG_M', 'WT_DIST_KM', 'WT_N5KM', 'F_NEW_' + m, 'F_MA_' + m,
+    'S_NEW_' + m, 'S_MA_' + m, 'D_' + m, 'S_RUN_TAN'];
   var link = ui.Label('Preparing CSV of these fields...', {fontSize: '11px', margin: '0 0 2px 0'});
   summaryPanel.add(link);
   fc.select(cols).getDownloadURL('CSV', cols, 'nwi_gw_subsidy_fields_' + m, function (url, err) {
@@ -558,23 +572,23 @@ function showField(feature) {
     infoPanel.add(small('Soil (POLARIS 0-100 cm): ' + tex + '.  Roots: ' + p.ROOT_CM + ' cm.  ETo ' + fmt(p.ET0_MMD, 2) +
       ' mm/d.  Tan d_dec ' + fmt(p.DDEC_M, 2) + ' m, d_ext ' + fmt(p.DEXT_M, 2) + ' m, p ' + fmt(p.P, 2) + '.'));
     infoPanel.add(small('Field mean DTW: new ' + fmt(p.DTW_NEW_M, 2) + ' m (min ' + fmt(p.DTW_NEW_MIN_M, 2) +
-      ', sigma ' + fmt(p.DTW_SIG_M, 1) + ');  Ma ' + (p.MA_COVER ? fmt(p.DTW_MA_M, 2) + ' m (min ' + fmt(p.DTW_MA_MIN_M, 2) + ')' : 'no coverage') +
-      '.  ETa ' + fmt(p.ETA_AF, 1) + ' acre-ft/yr.'));
+      ');  Ma ' + (p.MA_COVER ? fmt(p.DTW_MA_M, 2) + ' m (min ' + fmt(p.DTW_MA_MIN_M, 2) + ')' : 'no coverage') +
+      ';  run\'s map ' + fmt(p.DTW_RUN_M, 2) + ' m (sigma ' + fmt(p.DTW_SIG_M, 1) + ').  ETa ' + fmt(p.ETA_AF, 1) + ' acre-ft/yr.'));
     infoPanel.add(small('Nearest training well ' + fmt(p.WT_DIST_KM, 2) + ' km (' + p.WT_NEAR_SRC + ' ' + p.WT_NEAR_ID +
       ', well DTW ' + fmt(p.WT_NEAR_DTW_M, 1) + ' m); ' + p.WT_N1KM + ' within 1 km, ' + p.WT_N5KM + ' within 5 km.  ' +
       'Nearest gwx well ' + fmt(p.W_DIST_KM, 2) + ' km; with a time series ' + fmt(p.W_TS_DIST_KM, 2) + ' km.'));
 
     infoPanel.add(row(['Model (acre-ft/yr)', 'f new', 'f Ma', 'new', 'Ma', 'new - Ma'], true));
-    var models = [['TAN', 'Tan (run)'], ['TANR', 'Tan (recomputed)'], ['BANTA', 'Banta'], ['AVER', 'Averianov'], ['SHAH', 'Shah']];
-    models.forEach(function (mm) {
+    [['TAN', 'Tan'], ['BANTA', 'Banta'], ['AVER', 'Averianov'], ['SHAH', 'Shah']].forEach(function (mm) {
       var k = mm[0];
-      var fMa = k === 'TANR' ? p.F_MA_TAN : p['F_MA_' + k];
-      var sMa = k === 'TANR' ? p.S_MA_TAN : p['S_MA_' + k];
-      infoPanel.add(row([mm[1] + (k === m ? ' *' : ''), fmt(p['F_NEW_' + k], 3), fmt(fMa, 3),
-        fmt(p['S_NEW_' + k], 1), fmt(sMa, 1), fmt(p['S_NEW_' + k] - sMa, 1)], k === m));
+      infoPanel.add(row([mm[1] + (k === m ? ' *' : ''), fmt(p['F_NEW_' + k], 3), fmt(p['F_MA_' + k], 3),
+        fmt(p['S_NEW_' + k], 1), fmt(p['S_MA_' + k], 1), fmt(p['S_NEW_' + k] - p['S_MA_' + k], 1)], k === m));
     });
-    infoPanel.add(small('Field f = coverage-weighted mean of f over the 100 m pixels touching the field ' +
-      '(not f at the mean depth). Tan (recomputed) uses the same inputs as Banta, Averianov, Shah and Ma.'));
+    infoPanel.add(row(['Tan, the run (report)', fmt(p.F_RUN_TAN, 3), '', fmt(p.S_RUN_TAN, 1), '', ''], false));
+    infoPanel.add(row(['Tan, run\'s map recomputed', fmt(p.F_R08_TAN, 3), '', fmt(p.S_R08_TAN, 1), '', ''], false));
+    infoPanel.add(small('Field f = coverage-weighted mean of f over the 30 m pixels touching the field ' +
+      '(not f at the mean depth). The run used its 2026-10-08 100 m map; "recomputed" is this app\'s inputs on that ' +
+      'map, so its gap to the run is the recomputation error and its gap to Tan above is the effect of the new map.'));
     infoPanel.add(fCurveChart(p, m));
     addFieldYearChart(p, m);
   });
@@ -592,7 +606,7 @@ function fOf(model, d, dDec, dExt, p) {
   return Math.pow((dExt - d) / span, p);
 }
 function fCurveChart(p, m) {
-  var key = m === 'TANR' ? 'TAN' : m;
+  var key = m;
   var dMax = Math.max(4, Math.min(16, (p.DEXT_M || 6) * 1.05));
   var cols = [{id: 'd', label: 'Depth to water (m)', type: 'number'},
               {id: 'fn', label: 'f, new-DTW parameters', type: 'number'},
@@ -625,25 +639,31 @@ function fCurveChart(p, m) {
 }
 
 // Annual subsidy, new vs Ma, for the selected model (one axis; the field's ETa is in the text above).
+// For Tan the run's own values are added as a grey reference line.
 function addFieldYearChart(p, m) {
   var note = small('Loading the 41 years...');
   infoPanel.add(note);
   fieldYears.filter(ee.Filter.eq('NWI_ID', p.NWI_ID)).sort('YEAR')
-    .reduceColumns(ee.Reducer.toList().repeat(4), ['YEAR', 'IRR', 'S_NEW_' + m, 'S_MA_' + m])
+    .reduceColumns(ee.Reducer.toList().repeat(5), ['YEAR', 'IRR', 'S_NEW_' + m, 'S_MA_' + m, 'S_RUN_TAN'])
     .get('list').evaluate(function (L, err) {
       infoPanel.remove(note);
       if (err || !L) { infoPanel.add(small('Annual query failed: ' + err)); return; }
+      var withRun = m === 'TAN';
       var cols = [{id: 'y', label: 'Year', type: 'number'},
                   {id: 'n', label: 'New DTW', type: 'number'},
                   {id: 'm', label: 'Ma et al.', type: 'number'}];
+      if (withRun) cols.push({id: 'r', label: 'The run (report)', type: 'number'});
       var rows = L[0].map(function (y, i) {
         var irr = L[1][i] === 1;
-        return {c: [{v: y}, {v: irr ? L[2][i] : null}, {v: irr ? L[3][i] : null}]};
+        var c = [{v: y}, {v: irr ? L[2][i] : null}, {v: irr ? L[3][i] : null}];
+        if (withRun) c.push({v: irr ? L[4][i] : null});
+        return {c: c};
       });
       infoPanel.add(ui.Chart({cols: cols, rows: rows}, 'LineChart', {
         title: 'Annual subsidy, ' + MODEL_LABEL[m] + ' (acre-ft; gaps = not irrigated)', height: 210,
         hAxis: {title: 'Year', format: '####'}, vAxis: {title: 'acre-ft', viewWindow: {min: 0}},
-        series: {0: {color: '#2a78d6', pointSize: 3}, 1: {color: '#eb6834', pointSize: 3}},
+        series: {0: {color: '#2a78d6', pointSize: 3}, 1: {color: '#eb6834', pointSize: 3},
+                 2: {color: '#898781', lineDashStyle: [4, 3]}},
         interpolateNulls: false, legend: {position: 'bottom'}, chartArea: {width: '78%'}
       }));
     });
@@ -665,20 +685,22 @@ function showHa(feature) {
     infoPanel.add(ui.Label(haTitle(p.HA_NAME, p.HYD_AREA), {fontWeight: 'bold', fontSize: '13px', margin: '2px 0'}));
     infoPanel.add(small(fmt(p.N_FIELDS) + ' fields, ' + fmt(p.N_IRR) + ' irrigated in at least one year; ETa ' +
       fmt(p.ETA_AF) + ' acre-ft/yr.  Fields with a Tan subsidy > 0.5 acre-ft/yr: new ' + fmt(p.N_SUB_NEW) +
-      ', Ma ' + fmt(p.N_SUB_MA) + '.'));
+      ', Ma ' + fmt(p.N_SUB_MA) + ', the run ' + fmt(p.N_SUB_RUN) + '.'));
     infoPanel.add(small('Acre-weighted field DTW (fields covered by both maps, ' + fmt(p.N_COVER) + '): new ' +
       fmt(p.DTW_NEW_M, 2) + ' m, Ma ' + fmt(p.DTW_MA_M, 2) + ' m.'));
     infoPanel.add(small('Training wells: median distance from irrigated fields ' + fmt(p.MED_WT_KM, 1) + ' km; ' +
       fmt(p.N_FAR5) + ' fields > 5 km away, with Tan subsidy new ' + fmt(p.S_NEW_TAN_FAR5) + ', Ma ' +
-      fmt(p.S_MA_TAN_FAR5) + ' acre-ft/yr.'));
-    infoPanel.add(row(['Model (acre-ft/yr)', 'new', 'Ma', 'new - Ma', 'Ma report'], true));
-    [['TAN', 'Tan (run)'], ['BANTA', 'Banta'], ['AVER', 'Averianov'], ['SHAH', 'Shah']].forEach(function (mm) {
+      fmt(p.S_MA_TAN_FAR5) + ', the run ' + fmt(p.S_RUN_TAN_FAR5) + ' acre-ft/yr.'));
+    infoPanel.add(row(['Model (acre-ft/yr)', 'new', 'Ma', 'new - Ma', 'report'], true));
+    [['TAN', 'Tan'], ['BANTA', 'Banta'], ['AVER', 'Averianov'], ['SHAH', 'Shah']].forEach(function (mm) {
       var k = mm[0];
       infoPanel.add(row([mm[1] + (k === m ? ' *' : ''), fmt(p['S_NEW_' + k]), fmt(p['S_MA_' + k]), fmt(p['D_' + k]),
-        k === 'TAN' ? fmt(p.S_MA_TAN_RPT) : ''], k === m));
+        k === 'TAN' ? 'Ma ' + fmt(p.S_MA_TAN_RPT) : ''], k === m));
     });
-    infoPanel.add(small('Ma report = docs/tables/ha_gw_subsidy_new_vs_ma.csv. Tan recomputed with the same ' +
-      'inputs as the Ma values: ' + fmt(p.S_NEW_TANR) + ' acre-ft/yr.'));
+    infoPanel.add(row(['Tan, the run (report)', fmt(p.S_RUN_TAN), '', '', ''], false));
+    infoPanel.add(row(['Tan, run\'s map recomputed', fmt(p.S_R08_TAN), '', '', ''], false));
+    infoPanel.add(small('"report" = docs/tables/ha_gw_subsidy_new_vs_ma.csv, made with the run\'s 2026-10-08 map and Ma et al. ' +
+      'on its 100 m grid; this app uses the new 30 m map and Ma et al. on that grid.'));
     addHaYearChart(p, m);
     addTopFields(p, m);
   });
@@ -686,14 +708,16 @@ function showHa(feature) {
 
 function addHaYearChart(p, m) {
   haYears.filter(ee.Filter.eq('HYD_AREA', p.HYD_AREA)).sort('YEAR')
-    .reduceColumns(ee.Reducer.toList().repeat(3), ['YEAR', 'S_NEW_' + m, 'S_MA_' + m]).get('list')
+    .reduceColumns(ee.Reducer.toList().repeat(4), ['YEAR', 'S_NEW_' + m, 'S_MA_' + m, 'S_RUN_TAN']).get('list')
     .evaluate(function (L, err) {
       if (err || !L || !L[0].length) return;
-      var data = [['Year', 'New DTW', 'Ma et al.']];
-      L[0].forEach(function (y, i) { data.push([y, L[1][i], L[2][i]]); });
+      var withRun = m === 'TAN';
+      var data = [withRun ? ['Year', 'New DTW', 'Ma et al.', 'The run (report)'] : ['Year', 'New DTW', 'Ma et al.']];
+      L[0].forEach(function (y, i) { data.push(withRun ? [y, L[1][i], L[2][i], L[3][i]] : [y, L[1][i], L[2][i]]); });
       infoPanel.add(ui.Chart(data, 'LineChart', {
         title: 'Annual subsidy, irrigated fields, ' + MODEL_LABEL[m] + ' (acre-ft)', height: 200,
-        hAxis: {format: '####'}, series: {0: {color: '#2a78d6'}, 1: {color: '#eb6834'}},
+        hAxis: {format: '####'}, vAxis: {viewWindow: {min: 0}},
+        series: {0: {color: '#2a78d6'}, 1: {color: '#eb6834'}, 2: {color: '#898781', lineDashStyle: [4, 3]}},
         legend: {position: 'bottom'}, chartArea: {width: '78%'}
       }));
     });
@@ -736,10 +760,11 @@ function showWell(feature) {
     if (err || !p) { infoPanel.add(small('Query failed: ' + err)); return; }
     infoPanel.add(ui.Label('Training well ' + p.canonical_id, {fontWeight: 'bold', fontSize: '13px', margin: '2px 0'}));
     infoPanel.add(small('Source ' + p.source + ', role ' + p.role + ', confinement ' + p.confine + '.'));
-    infoPanel.add(small('Well depth to water ' + fmt(p.dtw_m, 2) + ' m.  At its 100 m pixel: new map ' + fmt(p.dtw_new_m, 2) +
-      ' m (sigma ' + fmt(p.dtw_sigma_m, 1) + '), Ma ' + fmt(p.dtw_ma_m, 2) + ' m.  Map - well: new ' +
-      fmt(p.new_minus_well_m, 2) + ' m, Ma ' + fmt(p.ma_minus_well_m, 2) + ' m.'));
-    infoPanel.add(small('The new map was fitted to these wells, so its difference here is not an independent check.'));
+    infoPanel.add(small('Well depth to water ' + fmt(p.dtw_m, 2) + ' m.  At its pixel: new map ' + fmt(p.dtw_new_m, 2) +
+      ' m, Ma ' + fmt(p.dtw_ma_m, 2) + ' m, run\'s map ' + fmt(p.dtw_run_m, 2) + ' m (sigma ' + fmt(p.dtw_sigma_m, 1) +
+      ').  Map - well: new ' + fmt(p.new_minus_well_m, 2) + ' m, Ma ' + fmt(p.ma_minus_well_m, 2) + ' m, run\'s map ' +
+      fmt(p.run_minus_well_m, 2) + ' m.'));
+    infoPanel.add(small('Both handily maps were fitted to these wells, so their differences here are not an independent check.'));
   });
 }
 
@@ -793,11 +818,11 @@ function buildRanking(body) {
 }
 
 function buildChecks(body) {
-  body.add(small('Computed now from the app\'s tables (Tan) and compared with the report.'));
+  body.add(small('Computed now from the app\'s tables (Tan) and compared with the report (README.md, docs/GW_SUBSIDY.md).'));
   var irr = fieldsAll.filter(ee.Filter.gt('N_IRR_YRS', 0));
   var cov = irr.filter(ee.Filter.eq('MA_COVER', 1));
-  var sumAll = irr.reduceColumns(ee.Reducer.sum().repeat(4), ['S_NEW_TAN', 'ETA_AF', 'S_NEW_TANR', 'S_MA_TAN']).get('sum');
-  var sumCov = cov.reduceColumns(ee.Reducer.sum().repeat(2), ['S_NEW_TAN', 'S_MA_TAN']).get('sum');
+  var sumAll = irr.reduceColumns(ee.Reducer.sum().repeat(4), ['S_RUN_TAN', 'ETA_AF', 'S_R08_TAN', 'S_NEW_TAN']).get('sum');
+  var sumCov = cov.reduceColumns(ee.Reducer.sum().repeat(2), ['S_NEW_TAN', 'S_MA_TAN']).get('sum');  // new map, Ma
   var med = cov.reduceColumns(ee.Reducer.median().repeat(2), ['DTW_NEW_M', 'DTW_MA_M']).get('median');
   ee.Dictionary({a: sumAll, c: sumCov, n: cov.size(), md: med}).evaluate(function (r, err) {
     if (err) { body.add(small('Checks failed: ' + err)); return; }
@@ -806,19 +831,19 @@ function buildChecks(body) {
       body.add(row([text, fmt(app, dec), fmt(rep, dec), exact ? (same ? 'same' : 'DIFFERS') : (same ? 'same' : 'see note')], false));
     }
     body.add(row(['', 'app', 'report', ''], true));
-    line('Tan, new DTW, all fields', r.a[0], REPORT.subsidyAll, 0, true);
+    line('Tan, the run, all fields', r.a[0], REPORT.subsidyAll, 0, true);
     line('ETa, irrigated field-years', r.a[1], REPORT.etaAll, 0, true);
+    line('Tan, run\'s map recomputed', r.a[2], REPORT.subsidyAll, 0, false);
+    line('Tan, new DTW, all fields', r.a[3], REPORT.subsidyAll, 0, false);
     line('Fields covered by both maps', r.n, REPORT.nCovered, 0, false);
     line('Covered fields, Tan, new DTW', r.c[0], REPORT.coveredNew, 0, false);
     line('Covered fields, Tan, Ma et al.', r.c[1], REPORT.coveredMa, 0, false);
     line('Median field DTW, new (m)', r.md[0], REPORT.medianDtwNew, 1, false);
     line('Median field DTW, Ma (m)', r.md[1], REPORT.medianDtwMa, 1, false);
-    line('Tan recomputed, all fields', r.a[2], REPORT.subsidyAll, 0, false);
-    body.add(small('Tan with the new DTW is the run\'s value and matches exactly. The Ma et al. values are ' +
-      'recomputed (Ma resampled to the 100 m grid by area-weighted average, same fields and code); the ' +
-      'report\'s Ma comparison used a 100 m Ma file and run inputs that are not available here. Most of the ' +
-      'difference is in Lovelock Valley (073) and Carson Desert (101), where Tan recomputed from the same ' +
-      'inputs is also above the run. Fig. 11 prints the medians as "Ma vs new"; docs/GW_SUBSIDY.md lists them the other way round.'));
+    body.add(small('The run\'s own values match exactly. The report used the run\'s 2026-10-08 100 m map with Ma et al. ' +
+      'on that grid; this app uses the new 30 m map with Ma et al. on the 30 m grid, so the other lines are not expected to ' +
+      'match. "Run\'s map recomputed" applies this app\'s inputs to the run\'s map: its gap to the run (+0.75%) is the ' +
+      'recomputation error, mostly growing-season ETo in Lovelock Valley (073), Carson Desert (101) and Marys River (042).'));
   });
 }
 
@@ -830,18 +855,22 @@ function buildNotes(body) {
       'field\'s POLARIS texture (0-100 cm), rooting depth (200 cm for alfalfa, orchards, vineyards, forest, ' +
       'shrubland and wetlands; else 100 cm) and April-October ETo. Banta (d_dec = 0, p = 1), Averianov ' +
       '(d_dec = 0, p = 3) and Shah (exponential decay, f = 0.02 at d_ext) use the same d_ext.',
-    'Field f is the coverage-weighted mean of f over the field\'s 100 m DTW pixels. Fields with no pixel ' +
+    'Field f is the coverage-weighted mean of f over the field\'s 30 m DTW pixels. Fields with no pixel ' +
       'shallower than 16 m have f = 0 (for Shah too, as in the run).',
-    'New DTW: handily NV parity map, statewide 100 m (build 2026-10-08). The run used an EPSG:5070 copy of ' +
-      'it; the copy and the run\'s OpenET ETo are not available here. Tan recomputed from this map totals ' +
-      '34,993 acre-ft/yr against the run\'s 34,733 (+0.75%): the size of the error in the recomputed values.',
-    'Ma et al. (2026): 24 m map (wtd_nevada.tif) averaged onto the same 100 m grid; Nevada only, so fields ' +
+    'New DTW: handily NV parity map at 30 m, gs://ucrc-wtd/handily/nv/handily_dtw_nv_parity_30m.tif (2026-10-21). ' +
+      'Every value with it is computed with the run\'s code on the 2026-08-20 fields from the GeoPackage the run used.',
+    'The run (the report) used the 2026-10-08 statewide 100 m build of the same model; its own Tan values are ' +
+      'F_RUN_TAN and S_RUN_TAN. The same code with this app\'s inputs on that map totals 34,993 acre-ft/yr against ' +
+      'the run\'s 34,733 (+0.75%): the recomputation error. The run\'s ETo export and its copy of the map exist only ' +
+      'on the run computer. The uncertainty layer (sigma) is that build\'s; the bucket has none for the 30 m map.',
+    'Ma et al. (2026): 24 m map (wtd_nevada.tif) averaged onto the new map\'s 30 m grid; Nevada only, so fields ' +
       'outside Nevada have no Ma value (MA_COVER = 0). "Only fields covered by the Ma et al. map" gives the ' +
-      'like-for-like comparison.',
+      'like-for-like comparison. The report averaged Ma onto the run\'s 100 m grid, which hides narrow shallow ' +
+      'areas and gives much less Tan subsidy (18,563 against 28,630 acre-ft/yr on the 30 m grid).',
     'Training wells: the 9,448 wells the handily NV parity model was trained on ' +
       '(handily_wells_train_nv_parity.csv, dated 2026-10-21): 8,628 NDWR well-log depths and 820 monitoring ' +
-      'wells. Distances are from the field boundary (0 = a well inside the field). The map is within a median ' +
-      '1.8 m of the training wells and 6.0 m of other wells.',
+      'wells. Distances are from the field boundary (0 = a well inside the field). The new map is within a median ' +
+      '1.9 m of the training wells and 5.9 m of other wells (the run\'s map: 1.8 and 6.0 m).',
     'DTW maps are single snapshots; well depths are long-term means.',
     'Built by gee/prep/ in the nwi-t1-ag-water-use repository (branch gw-subsidy-assessments).'
   ].forEach(function (t) { body.add(small('- ' + t)); });

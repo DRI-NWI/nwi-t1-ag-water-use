@@ -1,32 +1,33 @@
 #!/usr/bin/env python3
 """
-GEE app input 4: per-field f for the four models, with the new DTW and with Ma et al., and the
-subsidy each gives.
+GEE app input 4: per-field f for the four models with the new DTW map and with Ma et al., f (Tan)
+with the run's own map, and the subsidy each gives.
 
 The run's own code computes everything here: scripts/gw_subsidy/wtd_zonal.run (zonal statistics
 and the per-pixel depths of shallow fields), polaris_gee (POLARIS texture), and
 subsidy.compute_field_params (Tan et al. parameters and f for the Tan, Banta, Averianov and Shah
-models, averaged over each field's 100 m pixels). Only paths and the inputs that live on the
-run computer are replaced:
+models, averaged over each field's pixels). Only paths and the inputs that live on the run
+computer are replaced:
 
-  * field polygons: fields_20260820.parquet (step 2) instead of the GeoPackage;
+  * field polygons: fields_20260820.parquet (step 2, from the GeoPackage the run used);
   * growing-season ETo: the April-October mean of ETO_MM in the run's field file (step 1)
     instead of the OpenET export it was copied from;
   * dominant crop: CROP_major from the run's field file (copied there from the boundary layer);
   * Earth Engine project: --ee-project (the run used nasa-water).
 
-Step A, the new DTW, must reproduce the run: f (Tan) is compared with gw_frac in the run's field
-file for every field, and the subsidy recomputed month by month from it with GW_subsidy_acre_ft.
-Step B repeats the calculation with each Ma et al. candidate raster from step 3 and compares the
-HA results with the report's table (docs/tables/ha_gw_subsidy_new_vs_ma.csv), with texture either
-as in the report's comparison (fields shallow only under Ma et al. had no texture in the run's
-texture file and took the loam fallback) or sampled for every field.
+A. The run's map (2026-10-08, 100 m), with texture as the run had it (only fields shallow under its
+   map sampled; the rest take the loam fallback): f (Tan) is compared with gw_frac in the run's field
+   file for every field. This measures how close the recomputation comes to the run.
+B. The new map (handily 30 m, 2026-10-21, step 3), every model.
+C. Ma et al. on the new map's 30 m grid, every model.
+B and C use each field's own POLARIS texture. Their HA totals are compared with the report's table
+(docs/tables/ha_gw_subsidy_new_vs_ma.csv) for the record only: the report used the run's map.
 
-Outputs (under --out): field_params_new.parquet, field_params_ma.parquet (the candidate that
-matches), field_texture.csv, field_dtw_sigma.parquet, 04_field_fractions_checks.json.
+Outputs (under --out): field_params_run.parquet, field_params_new.parquet, field_params_ma.parquet,
+field_texture.csv, field_dtw_sigma.parquet, 04_field_fractions_checks.json.
 
 Usage:
-    python 04_field_fractions.py [--ee-project nwi-usgs] [--out DIR] [--ma-methods ...]
+    python 04_field_fractions.py [--ee-project nwi-usgs] [--out DIR]
 """
 
 from __future__ import annotations
@@ -203,8 +204,6 @@ def ha_compare(fld, ha_col, value_col, ref, ref_col):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--ee-project", default="nwi-usgs")
-    ap.add_argument("--ma-methods", nargs="+", default=["nearest", "bilinear", "average"])
-    ap.add_argument("--ma-method", default="average", help="candidate used for the app")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
     out = out_dir(args.out)
@@ -215,73 +214,56 @@ def main():
     sigma = sigma_by_field(inp, rdir / "dtw_sigma_100m_epsg5070.tif", out)
 
     # ---- zonal statistics for every raster ---------------------------------------------------
-    shallow = {"new": zonal(inp, rdir / "dtw_new_100m_epsg5070.tif", out / "zonal_new", sigma)}
-    for m in args.ma_methods:
-        shallow[f"ma_{m}"] = zonal(inp, rdir / f"dtw_ma_100m_epsg5070_{m}.tif", out / f"zonal_ma_{m}", sigma)
+    rasters = {"run": rdir / "dtw_run_100m_epsg5070.tif",      # the run's map: 2026-10-08, 100 m
+               "new": rdir / "dtw_new_30m_epsg5070.tif",       # the new map: handily 30 m, 2026-10-21
+               "ma": rdir / "dtw_ma_30m_epsg5070.tif"}         # Ma et al. on the new map's 30 m grid
+    shallow = {k: zonal(inp, r, out / f"zonal_{k}", sigma) for k, r in rasters.items()}
     for k, v in shallow.items():
-        print(f"[zonal] {k}: {len(v):,} fields with a pixel shallower than {wtd_zonal.KEEP_DEPTH_M} m")
+        print(f"[zonal] {k}: {len(v):,} fields with a pixel shallower than {wtd_zonal.KEEP_DEPTH_M} m", flush=True)
+    checks["n_shallow_fields"] = {k: len(v) for k, v in shallow.items()}
 
-    # ---- texture: the run sampled the new-DTW shallow fields; sample the union here ------------
+    # ---- texture: sampled for every field that is shallow under any of the maps ---------------
     tex_all = out / "field_texture.csv"
-    union = set().union(*shallow.values())
-    tex = sample_texture(inp, union, tex_all, args.ee_project)
-    tex_run_like = out / "field_texture_new_shallow_only.csv"
-    tex[tex["OPENET_ID"].isin(set(shallow["new"]))].to_csv(tex_run_like, index=False)
+    tex = sample_texture(inp, set().union(*shallow.values()), tex_all, args.ee_project)
+    # The run sampled only the fields shallow under its own map; the rest took the loam fallback.
+    tex_run_like = out / "field_texture_run_shallow_only.csv"
+    tex[tex["OPENET_ID"].isin(set(shallow["run"]))].to_csv(tex_run_like, index=False)
     print(f"[soil] {tex['texture'].notna().sum():,} of {len(tex):,} fields classified")
 
     months = Months(out)
     run_f = inp.static.set_index("OPENET_ID")["gw_frac"]
+    tot_run = float(months.field_mean(months.run_sub).sum())
 
-    # ---- A. new DTW: must reproduce the run ------------------------------------------------------
-    pn = field_params(inp, rdir / "dtw_new_100m_epsg5070.tif", out / "zonal_new", tex_run_like, sigma)
-    f_new = pn.set_index("OPENET_ID")["gwFrac_tan_crop"].reindex(run_f.index).fillna(0.0)
-    d = (f_new - run_f).abs()
-    checks["new_f_max_abs_diff"] = float(d.max())
-    checks["new_f_n_fields_diff_gt_1e-9"] = int((d > 1e-9).sum())
-    checks["new_f_n_fields_diff_gt_1e-4"] = int((d > 1e-4).sum())
-    sub_new = months.subsidy(f_new)
-    checks["new_subsidy_max_abs_diff_acre_ft_month"] = float(np.nanmax(np.abs(sub_new - months.run_sub)))
-    tot_re, tot_run = months.field_mean(sub_new).sum(), months.field_mean(months.run_sub).sum()
-    checks["new_tan_total_recomputed"], checks["new_tan_total_run"] = float(tot_re), float(tot_run)
-    print(f"[A] f (Tan, new DTW) vs run gw_frac: max |diff| {d.max():.3e}; "
-          f"{(d > 1e-9).sum()} fields differ by > 1e-9, {(d > 1e-4).sum()} by > 1e-4")
-    print(f"[A] monthly subsidy vs run: max |diff| {checks['new_subsidy_max_abs_diff_acre_ft_month']:.3e} acre-ft; "
-          f"annual mean total recomputed {tot_re:,.1f} vs run {tot_run:,.1f} acre-ft/yr")
-    if (d > 1e-4).any():
-        bad = pn.set_index("OPENET_ID").loc[d[d > 1e-4].index[:10],
-                                            ["texture", "root_depth_cm", "et0_mm_d", "wtd_min_m", "gwFrac_tan_crop"]]
-        print(bad.assign(run=run_f.reindex(bad.index)).to_string())
-    pn.to_parquet(out / "field_params_new.parquet", index=False)
+    def tan(params):
+        """f (Tan) per field and the annual-mean subsidy it gives, per field."""
+        f = params.set_index("OPENET_ID")["gwFrac_tan_crop"].reindex(run_f.index).fillna(0.0)
+        return f, months.field_mean(months.subsidy(f))
 
-    # ---- B. Ma et al.: which candidate reproduces the report -----------------------------------
+    # ---- A. the run's map: how close the recomputation comes to the run -----------------------
+    pr = field_params(inp, rasters["run"], out / "zonal_run", tex_run_like, sigma)
+    f_r, s_r = tan(pr)
+    d = (f_r - run_f).abs()
+    checks.update({"run_map_f_max_abs_diff": float(d.max()), "run_map_f_n_fields_diff_gt_1e-9": int((d > 1e-9).sum()),
+                   "run_map_f_n_fields_diff_gt_1e-4": int((d > 1e-4).sum()),
+                   "run_map_tan_total_recomputed": float(s_r.sum()), "tan_total_run": tot_run})
+    print(f"[A] run's map: f (Tan) vs the run's gw_frac: max |diff| {d.max():.3e}; {(d > 1e-9).sum()} fields differ "
+          f"by > 1e-9, {(d > 1e-4).sum()} by > 1e-4. Tan total recomputed {s_r.sum():,.1f} vs run {tot_run:,.1f} acre-ft/yr",
+          flush=True)
+    pr.to_parquet(out / "field_params_run.parquet", index=False)
+
+    # ---- B. the new map, every model; C. Ma et al. on the same 30 m grid ----------------------
+    # Texture is each field's own (sampled for every shallow field), as in the app's Ma comparison.
     ref = pd.read_csv(HA_TABLE, dtype={"HYD_AREA": str}).set_index("HYD_AREA")
     ha = inp.static.set_index("OPENET_ID")["HYD_AREA"].reindex(months.ids)
-    results = {}
-    for m in args.ma_methods:
-        for tex_mode, tex_csv in (("run_like", tex_run_like), ("all_sampled", tex_all)):
-            sub = out / f"zonal_ma_{m}"
-            pm = field_params(inp, rdir / f"dtw_ma_100m_epsg5070_{m}.tif", sub, tex_csv, sigma)
-            pm.to_parquet(sub / f"field_params_{tex_mode}.parquet", index=False)
-            f_ma = pm.set_index("OPENET_ID")["gwFrac_tan_crop"]
-            fld = pd.DataFrame({"HYD_AREA": ha, "sub_ma": months.field_mean(months.subsidy(f_ma))})
-            dmax, nbad, worst = ha_compare(fld, "HYD_AREA", "sub_ma", ref, "subsidy_ma_acre_ft_yr")
-            results[f"{m}/{tex_mode}"] = {"ha_max_abs_diff": dmax, "n_ha_off": nbad, "worst": worst,
-                                          "total": float(fld["sub_ma"].sum())}
-            print(f"[B] Ma {m:8s} texture {tex_mode:11s}: HA subsidy max |diff| {dmax:9.2f} acre-ft/yr, "
-                  f"{nbad:3d} HAs off; total {fld['sub_ma'].sum():,.1f}")
-    checks["ma_candidates"] = results
-    # Kept: `average` (the area-weighted mean is the right way to coarsen the 24 m Ma grid to
-    # 100 m, and it reproduces the report's Ma footprint, 16,224 of its 16,225 covered fields, and
-    # its HA DTW means best) with texture sampled for every field. No candidate reproduces the
-    # report's Ma subsidy exactly; see gee/README.md.
-    best = f"{args.ma_method}/all_sampled"
-    checks["ma_best"] = best
-    m, tex_mode = best.split("/")
-    pd.read_parquet(out / f"zonal_ma_{m}" / f"field_params_{tex_mode}.parquet").to_parquet(
-        out / "field_params_ma.parquet", index=False)
-    import shutil
-    shutil.copyfile(rdir / f"dtw_ma_100m_epsg5070_{m}.tif", rdir / "dtw_ma_100m_epsg5070.tif")
-    print(f"[B] best: {best} -> field_params_ma.parquet, rasters/dtw_ma_100m_epsg5070.tif")
+    for step, name, ref_col in (("B", "new", "subsidy_new_acre_ft_yr"), ("C", "ma", "subsidy_ma_acre_ft_yr")):
+        p = field_params(inp, rasters[name], out / f"zonal_{name}", tex_all, sigma)
+        p.to_parquet(out / f"field_params_{name}.parquet", index=False)
+        _, s = tan(p)
+        dmax, nbad, worst = ha_compare(pd.DataFrame({"HYD_AREA": ha, "s": s}), "HYD_AREA", "s", ref, ref_col)
+        checks[f"{name}_tan_total"] = float(s.sum())
+        checks[f"{name}_vs_report_{ref_col}"] = {"ha_max_abs_diff": dmax, "n_ha_off": nbad, "worst": worst}
+        print(f"[{step}] {name}: Tan total {s.sum():,.1f} acre-ft/yr; against the report's {ref_col}, "
+              f"{nbad} HAs differ (largest {dmax:,.1f})", flush=True)
     (out / "04_field_fractions_checks.json").write_text(json.dumps(checks, indent=2, default=float))
 
 

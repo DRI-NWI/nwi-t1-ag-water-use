@@ -2,20 +2,23 @@
 """
 GEE app input 2: the 2026-08-20 field polygons, one per NWI_ID.
 
-Reads the boundary layer the run used (config inputs.fields_gpkg) or, with --from-ee, the same
-layer as an Earth Engine table (projects/ee-prevelle/assets/NWI/
+Reads the boundary layer the run used (config inputs.fields_gpkg, or --gpkg PATH for a copy such as
+the one in the "RESERVOIR - GIS" OneDrive folder) or, with --from-ee, the same layer as an Earth Engine table (projects/ee-prevelle/assets/NWI/
 nevada_agricultural_field_boundaries_20260820), dissolves multi-part fields by NWI_ID as
 gw_subsidy.wtd_zonal does, and writes fields_20260820.parquet (GeoParquet, EPSG:4326, 2-D).
 
 Checks that the IDs are exactly the 29,338 fields of the run (field_static.parquet from step 1).
 
 Usage:
-    python 02_field_geometries.py [--from-ee] [--ee-project nwi-usgs] [--out DIR]
+    python 02_field_geometries.py [--gpkg PATH | --from-ee] [--ee-project nwi-usgs] [--out DIR]
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
+from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
@@ -49,6 +52,7 @@ def polygonal(geom):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--gpkg", default=None, help="the GeoPackage, when it is not at the config path")
     ap.add_argument("--from-ee", action="store_true", help="read the EE table instead of the run's GeoPackage")
     ap.add_argument("--ee-project", default="nwi-usgs")
     ap.add_argument("--out", default=None)
@@ -59,8 +63,10 @@ def main():
         gdf = from_ee(args.ee_project)
         source = EE_FIELDS
     else:
-        source = CFG["inputs"]["fields_gpkg"]
+        source = args.gpkg or CFG["inputs"]["fields_gpkg"]
         gdf = gpd.read_file(source, columns=["NWI_ID", "Acres", "Basin", "STATE"]).to_crs(4326)
+        md5 = hashlib.md5(Path(source).read_bytes()).hexdigest()
+        print(f"[fields] {Path(source).name}: MD5 {md5}")
     print(f"[fields] {len(gdf):,} features from {source}")
 
     gdf = gdf[gdf["NWI_ID"].notna()].copy()
@@ -87,6 +93,8 @@ def main():
         raise SystemExit("field IDs differ from the run")
     gdf.to_parquet(out / "fields_20260820.parquet", index=False)
     print(f"[fields] wrote {out / 'fields_20260820.parquet'}")
+    (out / "02_field_geometries_checks.json").write_text(json.dumps(
+        {"source": str(source), "md5": None if args.from_ee else md5, "n_fields": len(gdf)}, indent=2))
 
 
 if __name__ == "__main__":

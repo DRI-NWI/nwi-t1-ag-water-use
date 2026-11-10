@@ -11,26 +11,25 @@ Builds, from steps 1-5 (under --out/app):
   wells_train.csv, wells_gwx_nv.csv    wells (points)
   app_summary.json                     totals and every check
 
-f per field (F_<MAP>_<MODEL>; MAP = NEW or MA; MODEL = TAN, BANTA, AVER, SHAH):
-  * F_NEW_TAN is gw_frac from the run's field file: the values in the report.
-  * All other f come from step 4 (--params-new, --params-ma): the run's own code applied to the
-    2026-10-08 DTW map and to Ma et al. on the same 100 m grid, for the same 2026-08-20 fields.
-    F_NEW_TANR is Tan recomputed the same way; its difference from F_NEW_TAN shows how far the
-    recomputed values can be from what the run's inputs would give. Passing the run's own
-    04_gw_subsidy/field_params.parquet and ma_comparison/field_params.parquet as --params-new and
-    --params-ma makes every f the run's.
+f per field (F_<MAP>_<MODEL>; MODEL = TAN, BANTA, AVER, SHAH), all from step 4 with the run's own code:
+  * NEW: the new DTW map, handily NV parity at 30 m (gs://ucrc-wtd/handily/nv/, 2026-10-21).
+  * MA: Ma et al. (2026) on the same 30 m grid.
+  * RUN (Tan only): gw_frac from the run's field file, made with the run's 2026-10-08 100 m map. These
+    are the values in the report.
+  * R08 (Tan only): Tan recomputed by step 4 with the run's map. R08 - RUN is the recomputation error
+    (inputs only on the run computer); NEW - R08 is the effect of changing the map.
 
 Subsidy (S_<MAP>_<MODEL>, acre-ft/yr): month by month min(f x ETa, max(NetET_pre_subsidy, 0)) as in
 the run, summed over irrigated field-years (%_IRRIGATED > 0.5) and divided by the 41 years.
 D_<MODEL> = S_NEW_<MODEL> - S_MA_<MODEL>.
 
-Checks that stop the script: the Tan subsidy with the new DTW equals the run's GW_subsidy_acre_ft in
-every field-month, and the statewide and HA totals equal README.md and
-docs/tables/ha_gw_subsidy_new_vs_ma.csv. Comparisons with the report's Ma et al. numbers are recorded
-in app_summary.json and shown in the app.
+Checks that stop the script: the subsidy from the run's f (RUN) equals the run's GW_subsidy_acre_ft in
+every field-month, and its statewide and HA totals equal README.md and
+docs/tables/ha_gw_subsidy_new_vs_ma.csv. The new map's numbers against the report are recorded in
+app_summary.json and shown in the app; they are not expected to match (the report used the run's map).
 
 Usage:
-    python 06_app_tables.py [--out DIR] [--params-new PARQUET] [--params-ma PARQUET]
+    python 06_app_tables.py [--out DIR] [--params-new PARQUET] [--params-ma PARQUET] [--params-run PARQUET]
 """
 
 from __future__ import annotations
@@ -85,6 +84,7 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--params-new", type=Path, default=None, help="default <out>/field_params_new.parquet")
     ap.add_argument("--params-ma", type=Path, default=None, help="default <out>/field_params_ma.parquet")
+    ap.add_argument("--params-run", type=Path, default=None, help="default <out>/field_params_run.parquet")
     args = ap.parse_args()
     out = out_dir(args.out)
     app = out / "app"
@@ -93,21 +93,25 @@ def main():
     nwi_config.RunPaths.make = lambda self: self
     from gw_subsidy import crops
     fx = json.loads((out / "04_field_fractions_checks.json").read_text())
-    summary = {"ma_candidate": fx["ma_best"], "params_new": str(args.params_new or out / "field_params_new.parquet"),
-               "params_ma": str(args.params_ma or out / "field_params_ma.parquet"), "vs_report": {}}
+    summary = {"dtw_new": "handily_dtw_nv_parity_30m.tif (gs://ucrc-wtd/handily/nv/, 2026-10-21)",
+               "dtw_run": "nv_dtw_parity_statewide_100m.tif (2026-10-08 build, the run's map)",
+               "dtw_ma": "Ma et al. (2026) wtd_nevada.tif averaged onto the new map's 30 m grid",
+               "step4": fx, "params_new": str(args.params_new or out / "field_params_new.parquet"),
+               "params_ma": str(args.params_ma or out / "field_params_ma.parquet"),
+               "params_run": str(args.params_run or out / "field_params_run.parquet"), "vs_report": {}}
 
     st = pd.read_parquet(out / "field_static.parquet").set_index("NWI_ID")
     geo = gpd.read_parquet(out / "fields_20260820.parquet").set_index("NWI_ID")
     pn = pd.read_parquet(summary["params_new"]).set_index("OPENET_ID")
     pm = pd.read_parquet(summary["params_ma"]).set_index("OPENET_ID")
+    pr = pd.read_parquet(summary["params_run"]).set_index("OPENET_ID")
     wl = pd.read_parquet(out / "field_wells.parquet").set_index("NWI_ID")
     ids = st.index.sort_values()
 
-    f = {("NEW", "TAN"): st["gw_frac"].reindex(ids)}                    # the run's f
-    f[("NEW", "TANR")] = pn["gwFrac_tan_crop"].reindex(ids).fillna(0.0)  # recomputed, for QA
+    f = {("RUN", "TAN"): st["gw_frac"].reindex(ids),                     # the run's f (the report)
+         ("R08", "TAN"): pr["gwFrac_tan_crop"].reindex(ids).fillna(0.0)}  # Tan recomputed with the run's map
     for k, m in MODELS.items():
-        if k != "TAN":
-            f[("NEW", k)] = pn[f"gwFrac_{m}_crop"].reindex(ids).fillna(0.0)
+        f[("NEW", k)] = pn[f"gwFrac_{m}_crop"].reindex(ids).fillna(0.0)
         f[("MA", k)] = pm[f"gwFrac_{m}_crop"].reindex(ids).fillna(0.0)
 
     # ---- monthly subsidy for every variant -> field-year ---------------------------------------
@@ -128,10 +132,10 @@ def main():
     fy["ETA_AF"] = np.bincount(key, weights=np.nan_to_num(eta), minlength=nkey)
     for (mp, k), fv in f.items():
         sub = np.minimum(fv.to_numpy()[code] * eta, netpos)
-        if (mp, k) == ("NEW", "TAN"):
+        if (mp, k) == ("RUN", "TAN"):
             same_nan = np.array_equal(np.isnan(sub), np.isnan(run_sub))
             err = np.nanmax(np.abs(sub - run_sub))
-            check("Tan, new DTW: subsidy = run GW_subsidy_acre_ft in every field-month", same_nan and err < 1e-9,
+            check("Tan, run's f: subsidy = run GW_subsidy_acre_ft in every field-month", same_nan and err < 1e-9,
                   f"max |diff| {err:.1e}; NaN months identical: {same_nan}")
         fy[f"S_{mp}_{k}"] = np.bincount(key, weights=np.nan_to_num(sub), minlength=nkey)
     irr_y = fy["IRR"].to_numpy(bool)
@@ -158,11 +162,13 @@ def main():
                      ("DDEC_M", "d_dec_m"), ("DEXT_M", "d_ext_m"), ("P", "p"),
                      ("DTW_NEW_M", "wtd_mean_m"), ("DTW_NEW_MIN_M", "wtd_min_m"), ("DTW_SIG_M", "dtw_sigma_mean_m")):
         fld[col] = pn[src].reindex(ids)
-    # Ma et al. used every field's own POLARIS texture; the new-DTW parameters fall back to loam for
-    # fields with no new-DTW pixel shallower than 16 m (their f is 0 either way), so keep both sets.
+    # Both maps use each field's own POLARIS texture (sampled for every field shallow under any map);
+    # fields shallow under neither fall back to loam (their f is 0 either way). Both sets are kept.
     for col, src in (("TEXTURE_MA", "texture"), ("DDEC_MA_M", "d_dec_m"), ("DEXT_MA_M", "d_ext_m"), ("P_MA", "p"),
                      ("DTW_MA_M", "wtd_mean_m"), ("DTW_MA_MIN_M", "wtd_min_m")):
         fld[col] = pm[src].reindex(ids)
+    for col, src in (("DTW_RUN_M", "wtd_mean_m"), ("DTW_RUN_MIN_M", "wtd_min_m")):
+        fld[col] = pr[src].reindex(ids)
     fld["DTW_D_M"] = fld["DTW_NEW_M"] - fld["DTW_MA_M"]
     fld["MA_COVER"] = fld["DTW_MA_M"].notna().astype(int)
     fld["ETA_AF"] = field_mean("ETA_AF")
@@ -176,15 +182,15 @@ def main():
 
     # ---- checks against the report ------------------------------------------------------------------
     print("Checks against the report")
-    tot = fld["S_NEW_TAN"].sum()
-    check("Tan, new DTW, all fields = README 34,733 acre-ft/yr", round(tot) == REPORT["subsidy_total"], f"{tot:,.1f}")
+    tot = fld["S_RUN_TAN"].sum()
+    check("Tan, run's f, all fields = README 34,733 acre-ft/yr", round(tot) == REPORT["subsidy_total"], f"{tot:,.1f}")
     eta_tot = fld["ETA_AF"].sum()
     check("ETa = README 1,423,458 acre-ft/yr", round(eta_tot) == REPORT["eta_total"], f"{eta_tot:,.1f}")
     ref = pd.read_csv(HA_TABLE, dtype={"HYD_AREA": str}).set_index("HYD_AREA")
     irr_f = fld["N_IRR_YRS"] > 0
-    ha_s = fld[irr_f].groupby("HYD_AREA")[["ETA_AF", "S_NEW_TAN", "S_MA_TAN"]].sum().round(2)
+    ha_s = fld[irr_f].groupby("HYD_AREA")[["ETA_AF", "S_RUN_TAN", "S_MA_TAN"]].sum().round(2)
     j = ref.join(ha_s, how="left")
-    for a, b in (("ETa_acre_ft_yr", "ETA_AF"), ("subsidy_new_acre_ft_yr", "S_NEW_TAN")):
+    for a, b in (("ETa_acre_ft_yr", "ETA_AF"), ("subsidy_new_acre_ft_yr", "S_RUN_TAN")):
         d = (j[a] - j[b]).abs().max()
         check(f"HA {a} = docs table", d <= 0.0051, f"max |diff| {d:.3f}")
     dma = (j["subsidy_ma_acre_ft_yr"] - j["S_MA_TAN"])
@@ -200,9 +206,11 @@ def main():
     r = float(np.corrcoef(np.log(both["DTW_MA_M"].clip(0.1)), np.log(both["DTW_NEW_M"].clip(0.1)))[0, 1])
     note(summary, "r(log field DTW)", r, REPORT["r_log"])
     note(summary, "Ma, Tan, all fields (acre-ft/yr)", float(fld["S_MA_TAN"].sum()), float(ref["subsidy_ma_acre_ft_yr"].sum()))
-    note(summary, "Tan recomputed (TANR) vs run, all fields (acre-ft/yr)", float(fld["S_NEW_TANR"].sum()), REPORT["subsidy_total"])
-    dfr = (fld["F_NEW_TANR"] - fld["F_NEW_TAN"]).abs()
-    summary["tanr_f_abs_diff_quantiles"] = dfr[fld["F_NEW_TAN"] > 0].quantile([0.5, 0.9, 0.99, 1.0]).to_dict()
+    note(summary, "Tan, new map, all fields (acre-ft/yr)", float(fld["S_NEW_TAN"].sum()), REPORT["subsidy_total"])
+    note(summary, "Tan recomputed with the run's map (R08), all fields (acre-ft/yr)", float(fld["S_R08_TAN"].sum()),
+         REPORT["subsidy_total"])
+    dfr = (fld["F_R08_TAN"] - fld["F_RUN_TAN"]).abs()
+    summary["r08_f_abs_diff_quantiles"] = dfr[fld["F_RUN_TAN"] > 0].quantile([0.5, 0.9, 0.99, 1.0]).to_dict()
     cov = both.assign(w=both["ACRES"])     # figures/_mapkit.field_attributes: Acres = ACRES_FTR_GEOM
     hw = cov.groupby("HYD_AREA").apply(lambda g: pd.Series({
         "DTW_NEW_M": np.average(g["DTW_NEW_M"], weights=g["w"]),
@@ -217,20 +225,23 @@ def main():
     g_irr = fld[irr_f].groupby("HYD_AREA")
     ha = pd.DataFrame({"N_FIELDS": fld.groupby("HYD_AREA").size(), "N_IRR": g_irr.size()}).fillna(0).astype(int)
     ha["ETA_AF"] = g_irr["ETA_AF"].sum()
-    for k in list(MODELS) + ["TANR"]:
+    for k in MODELS:
         ha[f"S_NEW_{k}"] = g_irr[f"S_NEW_{k}"].sum()
-        if k != "TANR":
-            ha[f"S_MA_{k}"] = g_irr[f"S_MA_{k}"].sum()
-            ha[f"D_{k}"] = ha[f"S_NEW_{k}"] - ha[f"S_MA_{k}"]
-    ha["S_MA_TAN_RPT"] = ref["subsidy_ma_acre_ft_yr"]          # the report's table, for the checks panel
+        ha[f"S_MA_{k}"] = g_irr[f"S_MA_{k}"].sum()
+        ha[f"D_{k}"] = ha[f"S_NEW_{k}"] - ha[f"S_MA_{k}"]
+    ha["S_RUN_TAN"] = g_irr["S_RUN_TAN"].sum()                 # the run (the report's new-DTW value)
+    ha["S_R08_TAN"] = g_irr["S_R08_TAN"].sum()
+    ha["S_MA_TAN_RPT"] = ref["subsidy_ma_acre_ft_yr"]          # the report's Ma value, for the checks panel
     ha["N_SUB_NEW"] = g_irr["S_NEW_TAN"].apply(lambda s: int((s > 0.5).sum()))
     ha["N_SUB_MA"] = g_irr["S_MA_TAN"].apply(lambda s: int((s > 0.5).sum()))
+    ha["N_SUB_RUN"] = g_irr["S_RUN_TAN"].apply(lambda s: int((s > 0.5).sum()))
     ha["N_COVER"] = both.groupby("HYD_AREA").size()
     ha = ha.join(hw)
     ha["MED_WT_KM"] = g_irr["WT_DIST_KM"].median()
     ha["N_FAR5"] = g_irr["WT_DIST_KM"].apply(lambda s: int((s > 5).sum()))
     ha["S_NEW_TAN_FAR5"] = fld[irr_f & (fld["WT_DIST_KM"] > 5)].groupby("HYD_AREA")["S_NEW_TAN"].sum()
     ha["S_MA_TAN_FAR5"] = fld[irr_f & (fld["WT_DIST_KM"] > 5)].groupby("HYD_AREA")["S_MA_TAN"].sum()
+    ha["S_RUN_TAN_FAR5"] = fld[irr_f & (fld["WT_DIST_KM"] > 5)].groupby("HYD_AREA")["S_RUN_TAN"].sum()
     ha["HA_NAME"] = fld.groupby("HYD_AREA")["HA_NAME"].first()
     num = [c for c in ha.columns if c not in ("HA_NAME", "DTW_NEW_M", "DTW_MA_M", "MED_WT_KM", "S_MA_TAN_RPT")]
     ha[num] = ha[num].fillna(0)
@@ -244,7 +255,7 @@ def main():
     full = pd.MultiIndex.from_product([ha.index[ha["N_IRR"] > 0], range(START_YEAR, START_YEAR + NY)],
                                       names=["HYD_AREA", "YEAR"])
     hy = hy.reindex(full, fill_value=0.0).reset_index()
-    check("HA-year sums / 41 = field means", abs(hy["S_NEW_TAN"].sum() / NY - tot) < 1e-6)
+    check("HA-year sums / 41 = field means", abs(hy["S_RUN_TAN"].sum() / NY - tot) < 1e-6)
 
     # ---- write ------------------------------------------------------------------------------------------
     fg = gpd.GeoDataFrame(fld.join(geo[["geometry"]]), geometry="geometry", crs=4326).reset_index()
@@ -264,7 +275,8 @@ def main():
                 w[c] = w[c].astype(int)
         wkt_csv(w, app / f"{name}.csv")
 
-    summary.update({"n_fields": len(fld), "n_fields_irrigated": int(irr_f.sum()), "subsidy_new_tan_total": tot,
+    summary.update({"n_fields": len(fld), "n_fields_irrigated": int(irr_f.sum()), "subsidy_run_tan_total": tot,
+                    "subsidy_new_tan_total": float(fld["S_NEW_TAN"].sum()),
                     "eta_total": eta_tot,
                     "totals": {c: float(fld[c].sum()) for c in fld.columns if c.startswith(("S_", "D_"))},
                     "covered_totals": {c: float(both[c].sum()) for c in both.columns if c.startswith(("S_", "D_"))}})

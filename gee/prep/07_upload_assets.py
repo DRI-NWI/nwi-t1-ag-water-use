@@ -33,7 +33,7 @@ STRING_COLS = {"NWI_ID", "STATE", "HYD_AREA", "HA_NAME", "SRC", "CROP_LBL", "TEX
                "WT_NEAR_ID", "WT_NEAR_SRC", "canonical_id", "source", "source_well_id", "confine",
                "well_class", "role", "h_accuracy_class", "confinement_class", "well_use"}
 LONG_COLS = {"YEAR", "IRR", "IRR_SRC", "SRC_ASSUMED", "CROP", "N_IRR_YRS", "MA_COVER", "ROOT_CM", "WT_N1KM",
-             "WT_N5KM", "N_FIELDS", "N_IRR", "N_SUB_NEW", "N_SUB_MA", "N_COVER", "N_FAR5", "obs_count",
+             "WT_N5KM", "N_FIELDS", "N_IRR", "N_SUB_NEW", "N_SUB_MA", "N_SUB_RUN", "N_COVER", "N_FAR5", "obs_count",
              "has_time_series", "is_train", "por_start_year", "por_end_year", "row_id"}
 
 
@@ -114,31 +114,38 @@ def main():
         print(f"[ee] created folder {root}")
 
     common = {"run_id": RUN_ID, "repo_commit": git_commit(), "created_by": "gee/prep/07_upload_assets.py",
-              "field_boundaries": "nevada_agricultural_field_boundaries_20260820 "
-                                  "(projects/ee-prevelle/assets/NWI/nevada_agricultural_field_boundaries_20260820)"}
+              "field_boundaries": "nevada_agricultural_field_boundaries_20260820.gpkg (MD5 ec2e7038a56c4e225ace0e0b83999d08, "
+                                  "data last changed 2026-09-21; the layer of "
+                                  "projects/ee-prevelle/assets/NWI/nevada_agricultural_field_boundaries_20260820)",
+              "dtw_new": "handily NV parity DTW, 30 m, gs://ucrc-wtd/handily/nv/handily_dtw_nv_parity_30m.tif (2026-10-21)"}
     tables = {
         f"fields_gw_subsidy_{SUFFIX}": ("fields_gw_subsidy.csv", True,
-            "One row per field: water-right source, crop, soil, Tan et al. parameters, field DTW (new and Ma et al.), "
-            "f and GW-ET subsidy (acre-ft/yr, 1985-2025 mean over irrigated field-years) for 4 models x 2 DTW maps, "
-            "distance to the DTW training wells. F_NEW_TAN/S_NEW_TAN are the run's values."),
+            "One row per field: water-right source, crop, soil, Tan et al. parameters, field DTW (new map, run's map, Ma et al.), "
+            "f and GW-ET subsidy (acre-ft/yr, 1985-2025 mean over irrigated field-years) for 4 models with the new map "
+            "(handily 30 m, 2026-10-21) and with Ma et al. on its grid, distance to the DTW training wells. "
+            "F_RUN_TAN/S_RUN_TAN are the run's values (the report, 2026-10-08 map); *_R08_TAN is Tan recomputed with that map."),
         f"field_year_gw_subsidy_{SUFFIX}": ("field_year_gw_subsidy.csv", False,
-            "One row per field-year: IRR (IrrMapper > 50%), ETa and GW-ET subsidy (acre-ft) for 4 models x 2 DTW maps."),
+            "One row per field-year: IRR (IrrMapper > 50%), ETa and GW-ET subsidy (acre-ft) for 4 models x 2 DTW maps, "
+            "the run's Tan (S_RUN_TAN) and Tan recomputed with the run's map (S_R08_TAN)."),
         f"ha_gw_subsidy_{SUFFIX}": ("ha_gw_subsidy.csv", True,
             "One row per hydrographic area (NWI_Investigations polygons): totals over irrigated field-years; "
-            "S_MA_TAN_RPT = docs/tables/ha_gw_subsidy_new_vs_ma.csv."),
+            "S_RUN_TAN = the run (the report's new-DTW value); S_MA_TAN_RPT = the report's Ma value "
+            "(docs/tables/ha_gw_subsidy_new_vs_ma.csv)."),
         f"ha_year_gw_subsidy_{SUFFIX}": ("ha_year_gw_subsidy.csv", False,
             "One row per HA-year: ETa and GW-ET subsidy (acre-ft) over irrigated field-years."),
         "wells_handily_train_nv": ("wells_train.csv", True,
             "Wells the handily NV parity DTW was trained on (gs://ucrc-wtd/handily/nv/handily_wells_train_nv_parity.csv, "
-            "2026-10-21), with the 100 m DTW maps sampled at each well."),
+            "2026-10-21), with the new 30 m map, the run's 100 m map, Ma et al. and sigma sampled at each well."),
         "wells_gwx_nv": ("wells_gwx_nv.csv", True,
             "gwx Nevada wells with a depth to water (gwx_nevada_wells.zip, product 2026-10-08, MD5 "
-            "e06c9fe9ea211b438bf2722c523ea459); is_train = at a training-well location."),
+            "e06c9fe9ea211b438bf2722c523ea459); is_train = at a training-well location; dtw_new_m and dtw_run_m = the new "
+            "30 m map and the run's 100 m map at the well."),
     }
-    image = ("dtw_100m_epsg5070", {
-        "dtw_new_m": rdir / "dtw_new_100m_epsg5070.tif",
+    image = ("dtw_epsg5070", {
+        "dtw_new_m": rdir / "dtw_new_30m_epsg5070.tif",
+        "dtw_ma_m": rdir / "dtw_ma_30m_epsg5070.tif",
         "dtw_sigma_m": rdir / "dtw_sigma_100m_epsg5070.tif",
-        "dtw_ma_m": rdir / "dtw_ma_100m_epsg5070.tif"})
+        "dtw_run_m": rdir / "dtw_run_100m_epsg5070.tif"})
 
     todo = set(args.only) if args.only else set(tables) | {image[0]}
     tasks = {}
@@ -177,10 +184,13 @@ def main():
                               "missingData": {"values": [-9999]}})
             manifest = {"name": asset, "tilesets": tilesets, "bands": bands, "properties": dict(
                 common,
-                dtw_new_m="handily NV parity DTW, statewide 100 m (nv_dtw_parity_statewide_100m.tif, build 2026-10-08, "
-                          "zip MD5 20af7ee2027ac234774f5a026ee9b4d8), tagged EPSG:5070 (no resampling)",
-                dtw_sigma_m="nv_sigma_parity_statewide_100m.tif, same build",
-                dtw_ma_m=f"Ma et al. (2026) wtd_nevada.tif warped to the same 100 m grid ({summary['ma_candidate']})")}
+                dtw_new_m="new map: handily NV parity DTW, 30 m, gs://ucrc-wtd/handily/nv/handily_dtw_nv_parity_30m.tif "
+                          "(2026-10-21, MD5 974338d10a021dcca7e52c70e2c44fba), rewritten with DEFLATE, pixels unchanged",
+                dtw_ma_m="Ma et al. (2026) wtd_nevada.tif averaged (area-weighted) onto the 30 m grid of dtw_new_m",
+                dtw_sigma_m="sigma of the run's map: nv_sigma_parity_statewide_100m.tif (2026-10-08 build; the bucket has "
+                            "no sigma layer), 100 m",
+                dtw_run_m="the run's map: nv_dtw_parity_statewide_100m.tif (2026-10-08 build, zip MD5 "
+                          "20af7ee2027ac234774f5a026ee9b4d8), tagged EPSG:5070, 100 m")}
             op = ee.data.startIngestion(ee.data.newTaskId()[0], manifest)
             tasks[image[0]] = op["name"]
             print(f"[ee] image ingestion started: {image[0]} ({op['name']})", flush=True)
