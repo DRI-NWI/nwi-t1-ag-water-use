@@ -1060,7 +1060,7 @@ function renderChecks() {
   b.appendChild(el('p', { class: 'note', style: 'margin-top:8px' }, 'The run\'s own values match the report exactly. The report used the run\'s 2026-10-08 100 m map with Ma et al. on that grid; ' +
     'this page uses the new 30 m map with Ma et al. on the 30 m grid, so the other lines are not expected to match. "Run\'s map recomputed" is this page\'s inputs on the run\'s map: ' +
     'its gap to the run (+0.75%) is the recomputation error, mostly growing-season ETo in Lovelock Valley (073), Carson Desert (101) and Marys River (042). ' +
-    'The Fig. 11 title prints the medians as "Ma vs new"; docs/GW_SUBSIDY.md on the branch has them as new 7.2 m, Ma 7.4 m.'));
+    'Fig. 11 and docs/GW_SUBSIDY.md give the report\'s medians as new 7.2 m, Ma 7.4 m.'));
 }
 function corr(a, b) {
   var n = a.length, ma = 0, mb = 0; for (var i = 0; i < n; i++) { ma += a[i]; mb += b[i]; } ma /= n; mb /= n;

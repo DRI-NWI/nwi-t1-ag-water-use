@@ -47,8 +47,7 @@ field's ETa. Compared with Ma et al. on the 100 m grid, the new map gives:
 ![Depth-to-groundwater comparison](images/fig11_dtw_new_vs_ma.png)
 
 **Fig. 11.**
-- **Field-average depth to groundwater.** The two maps have similar medians (new 7.2 m, Ma 7.4 m;
-  the figure title gives Ma first).
+- **Field-average depth to groundwater.** The two maps have similar medians (new 7.2 m, Ma 7.4 m).
   The new map is shallower in the northern meadows (South Fork Owyhee 2 vs 7 m, Salmon
   Falls 2 vs 8 m), deeper in Lovelock (6 vs 2 m), and deeper in many central basins.
 - **HA averages.** Depth to groundwater averaged over each HA's fields, weighted by field
