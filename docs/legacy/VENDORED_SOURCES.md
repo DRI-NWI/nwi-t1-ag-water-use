@@ -1,10 +1,11 @@
 # Code sources
 
 The scripts in `scripts/` are copies of the original scripts, edited in place. The copies
-were first committed unchanged (commit 9b60d5d, "Add original scripts, unmodified"). Every
-later change is marked `# NWI T1` in the code, and this command shows each edit:
+were first committed unchanged (commit 0dde9ab, "Add original scripts, unmodified, as the base
+for the NWI T1 edits"). Every later change is marked `# NWI T1` in the code, and this command shows
+each edit:
 
-    git diff 9b60d5d -- scripts/
+    git diff 0dde9ab -- scripts/
 
 Sources and versions: [../../scripts/ORIGINAL_SOURCES.md](../../scripts/ORIGINAL_SOURCES.md).
 

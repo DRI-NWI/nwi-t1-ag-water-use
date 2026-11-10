@@ -7,11 +7,12 @@ and reference ET (ETo) (see [METHODS.md](METHODS.md)). The subsidy is subtracted
 in every field-month, but never more than that month's net ET.
 
 The run uses the new statewide 100 m depth-to-groundwater map, `nv_dtw_parity_statewide_100m`
-(projection EPSG:5070). The figures compare it with the Ma et al. (2026) map, which the
-earlier subsidy work used. Both maps are put on the same 100 m grid and go through the same
-steps: depth averaged over each field's pixels, the same Tan et al. parameters, and the same
-water balance. Volumes are 1985–2025 annual averages, for fields in years when IrrMapper
-marks more than half of the field as irrigated.
+(handily NV parity model, build of 2026-10-08; projection EPSG:5070). The figures compare it with
+the Ma et al. (2026) map, which the earlier subsidy work used. Both maps are put on the same 100 m
+grid and go through the same steps: depth averaged over each field's pixels, the same Tan et al.
+parameters, and the same water balance. The comparison depends on that grid (see Map build and
+grid below). Volumes are 1985–2025 annual averages, for fields in years when IrrMapper marks more
+than half of the field as irrigated.
 
 | | Value |
 |---|---|
@@ -21,17 +22,27 @@ marks more than half of the field as irrigated.
 | Correlation between the two maps' field-average depths (on a log scale) | 0.68 |
 | Table by HA | `docs/tables/ha_gw_subsidy_new_vs_ma.csv` |
 
+**Map build and grid.** The handily bucket (`gs://ucrc-wtd/handily/nv/`) now holds only a later
+30 m build of the same model (`handily_dtw_nv_parity_30m.tif`, 2026-10-21), which this run did not
+use. Computed with the run's code on that map, with Ma et al. averaged onto the same 30 m grid
+(`gee/README.md`), the subsidy is 31,746 acre-ft/yr for all fields, 8.6% less than above; on the
+fields both maps cover it is 24,210 acre-ft/yr, close to the 24,184 above. On that common 30 m grid
+Ma et al. gives 28,630 acre-ft/yr, more than the new map: averaging Ma et al. onto 100 m hides narrow
+shallow areas that the steep Tan et al. curve credits most. The "more subsidy with the new map" result
+below therefore holds for the 100 m grid only.
+
 ![Field subsidy](images/fig10_gw_subsidy_fields_new_vs_ma.png)
 
 **Fig. 10.** Subsidy by field with each map: circle size = acre-ft/yr, color = share of the
-field's ETa. Compared with Ma et al., the new map gives:
+field's ETa. Compared with Ma et al. on the 100 m grid, the new map gives:
 - **More subsidy** in the northern meadow basins (South Fork Owyhee 3,479 vs 35 acre-ft/yr;
   Owyhee River, Salmon Falls Creek, Goose Creek) and Pahranagat Valley (1,776 vs 1).
-- **Less subsidy** in Lovelock Valley (2,175 vs 7,425), Carson Desert (3,503 vs 4,820) and
-  Carson Valley (1,007 vs 2,084).
+- **Less subsidy** in Lovelock Valley (2,175 vs 7,425), Mason Valley (5 vs 2,532), Carson Desert
+  (3,503 vs 4,820) and Carson Valley (1,007 vs 2,084).
 - **Coverage outside Nevada.** The Ma et al. map covers Nevada only, so the out-of-state
-  fields of Surprise Valley (5,123 acre-ft/yr, the largest HA subsidy) and Grouse Creek
-  Valley have a subsidy only with the new map.
+  fields of Surprise Valley (5,123 acre-ft/yr, the largest HA subsidy), Colorado Valley (2,016
+  of its 2,019 acre-ft/yr, on California fields), Grouse Creek Valley, and part of Goose Creek
+  (494 of its 1,125 acre-ft/yr, in Idaho and Utah) have a subsidy only with the new map.
 
 ![Depth-to-groundwater comparison](images/fig11_dtw_new_vs_ma.png)
 

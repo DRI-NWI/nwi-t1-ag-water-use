@@ -9,7 +9,8 @@ trained on, and how the four f(d) models compare.
 **Open it.** Paste [`nwi_gw_et_explorer_app.js`](nwi_gw_et_explorer_app.js) into the
 [Earth Engine Code Editor](https://code.earthengine.google.com) and press Run. It reads the
 assets in `projects/nwi-usgs/assets/nwi_gw_subsidy/`. They are public, so the app runs from any
-Earth Engine account.
+Earth Engine account. A browser version with the field polygons but no rasters, and the scripts that
+build its data, are in [`web/`](web/).
 
 The app started as an unchanged copy of the nwi-gw-subsidy app (`DRI-NWI/nwi-gw-subsidy`,
 `gee/nwi_gw_et_explorer_app.js` at commit 7262f69; first commit on this branch) and was then

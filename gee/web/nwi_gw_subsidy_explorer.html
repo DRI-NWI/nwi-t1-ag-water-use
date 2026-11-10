@@ -1,0 +1,1148 @@
+<title>NWI GW-ET Subsidy Explorer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,500..800&family=IBM+Plex+Mono:wght@400;500&family=Public+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: a working tool. Control and detail panel beside a full-bleed canvas map of the 2026-08-20 fields; on phones the map sits above the panel. */
+:root {
+  --bg: #f9f9f7; --surface: #fcfcfb; --raise: #f1f1ed; --ink: #0b0b0b; --ink-2: #52514e; --muted: #67665f;
+  --axis-ink: #898781; --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.12);
+  --accent: #46663d; --accent-ink: #ffffff; --accent-wash: rgba(70,102,61,0.10);
+  --new: #2a78d6; --ma: #eb6834; --curve: #52514e;
+  --good: #0ca30c; --good-text: #006300; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+  --seq-0: #e1e0d9; --seq-1: #9ec5f4; --seq-2: #6da7ec; --seq-3: #3987e5; --seq-4: #256abf; --seq-5: #184f95; --seq-6: #0d366b;
+  --div-0: #911e22; --div-1: #e24a48; --div-2: #f8aaa3; --div-3: #e1e0d9; --div-4: #9ec5f4; --div-5: #3987e5; --div-6: #184f95;
+  --dtw-0: #0d366b; --dtw-1: #184f95; --dtw-2: #256abf; --dtw-3: #3987e5; --dtw-4: #6da7ec; --dtw-5: #9ec5f4; --dtw-6: #e1e0d9;
+  --vio-0: #b9bafe; --vio-1: #9996fa; --vio-2: #7c6ff6; --vio-3: #6254ce; --vio-4: #493da1; --vio-5: #322874;
+  --font-display: "Archivo", "Arial Narrow", system-ui, sans-serif;
+  --font-ui: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d0d0d; --surface: #1a1a19; --raise: #232321; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #a3a29b;
+    --axis-ink: #898781; --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.12);
+    --accent: #a4c294; --accent-ink: #0d0d0d; --accent-wash: rgba(164,194,148,0.14);
+    --new: #3987e5; --ma: #d95926; --curve: #c3c2b7;
+    --good-text: #0ca30c;
+    --seq-0: #2c2c2a; --seq-1: #184f95; --seq-2: #256abf; --seq-3: #3987e5; --seq-4: #6da7ec; --seq-5: #9ec5f4; --seq-6: #cde2fb;
+    --div-0: #f8aaa3; --div-1: #e24a48; --div-2: #911e22; --div-3: #383835; --div-4: #184f95; --div-5: #3987e5; --div-6: #9ec5f4;
+    --dtw-0: #cde2fb; --dtw-1: #9ec5f4; --dtw-2: #6da7ec; --dtw-3: #3987e5; --dtw-4: #256abf; --dtw-5: #184f95; --dtw-6: #2c2c2a;
+    --vio-0: #493da1; --vio-1: #6254ce; --vio-2: #7c6ff6; --vio-3: #9996fa; --vio-4: #b9bafe; --vio-5: #dbdcff;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d0d0d; --surface: #1a1a19; --raise: #232321; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #a3a29b;
+  --axis-ink: #898781; --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.12);
+  --accent: #a4c294; --accent-ink: #0d0d0d; --accent-wash: rgba(164,194,148,0.14);
+  --new: #3987e5; --ma: #d95926; --curve: #c3c2b7;
+  --good-text: #0ca30c;
+  --seq-0: #2c2c2a; --seq-1: #184f95; --seq-2: #256abf; --seq-3: #3987e5; --seq-4: #6da7ec; --seq-5: #9ec5f4; --seq-6: #cde2fb;
+  --div-0: #f8aaa3; --div-1: #e24a48; --div-2: #911e22; --div-3: #383835; --div-4: #184f95; --div-5: #3987e5; --div-6: #9ec5f4;
+  --dtw-0: #cde2fb; --dtw-1: #9ec5f4; --dtw-2: #6da7ec; --dtw-3: #3987e5; --dtw-4: #256abf; --dtw-5: #184f95; --dtw-6: #2c2c2a;
+  --vio-0: #493da1; --vio-1: #6254ce; --vio-2: #7c6ff6; --vio-3: #9996fa; --vio-4: #b9bafe; --vio-5: #dbdcff;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: 14px; line-height: 1.45; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.app { height: 100%; display: grid; grid-template-rows: auto 1fr; }
+.top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; padding-block: 10px 9px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  border-bottom: 1px solid var(--border); background: var(--bg); }
+.top h1 { margin: 0; font-family: var(--font-display); font-stretch: 85%; font-weight: 750; font-size: 21px; letter-spacing: 0.005em; text-wrap: balance; }
+.top .run { color: var(--muted); font-size: 12.5px; }
+.top .run code { font-family: var(--font-mono); font-size: 12px; color: var(--ink-2); }
+.main { display: grid; grid-template-columns: minmax(330px, 400px) 1fr; min-height: 0; }
+.panel { overflow-y: auto; border-right: 1px solid var(--border); padding-block: 12px 28px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: 16px; display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.mapwrap { position: relative; min-width: 0; min-height: 0; background: var(--surface); }
+canvas#map { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+canvas#map.dragging { cursor: grabbing; }
+@media (max-width: 820px) {
+  html, body { height: auto; }
+  .app { height: auto; display: block; }
+  .main { display: flex; flex-direction: column; }
+  .mapwrap { order: -1; height: 62vh; min-height: 340px; }
+  .panel { border-right: 0; overflow: visible; padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+}
+
+section h2 { margin: 0 0 8px; font-family: var(--font-display); font-stretch: 85%; font-weight: 700; font-size: 15px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-2); }
+.row { display: grid; grid-template-columns: 112px 1fr; gap: 6px 10px; align-items: center; }
+.row label, .lab { color: var(--ink-2); font-size: 12.5px; }
+select, input[type="search"] { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+.checks { display: grid; gap: 4px; margin-top: 8px; }
+.check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; }
+.check input { margin-top: 3px; accent-color: var(--accent); }
+.slider { margin-top: 10px; }
+.slider .sv { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.slider .sv b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.slider input { width: 100%; accent-color: var(--accent); }
+.summary { padding: 10px 12px; background: var(--raise); border-radius: 8px; font-size: 13px; display: grid; gap: 6px; }
+.summary .big { font-size: 15px; }
+.summary .nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.summary .nums div { display: grid; gap: 1px; }
+.summary .nums span { color: var(--muted); font-size: 11.5px; }
+.summary .nums b { font-size: 15px; font-weight: 650; }
+.key { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+.btn { border: 1px solid var(--border); background: var(--surface); padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.btn:hover { background: var(--accent-wash); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.btnrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.note { color: var(--muted); font-size: 12px; }
+.layers { display: grid; gap: 4px; }
+
+.legend { position: absolute; left: max(10px, env(safe-area-inset-left, 0px)); bottom: max(10px, env(safe-area-inset-bottom, 0px)); background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; max-width: min(260px, calc(100% - 20px)); }
+.legend .t { font-weight: 600; margin-bottom: 4px; }
+.legend .sw { display: grid; grid-template-columns: 16px 1fr; gap: 3px 7px; align-items: center; font-variant-numeric: tabular-nums; }
+.legend .sw i { width: 14px; height: 10px; border-radius: 2px; display: block; }
+.legend .wl { margin-top: 6px; display: grid; gap: 2px; color: var(--ink-2); }
+.zoom { position: absolute; right: max(10px, env(safe-area-inset-right, 0px)); top: 10px; display: grid; gap: 4px; }
+.zoom button { width: 32px; height: 32px; border: 1px solid var(--border); background: var(--surface); border-radius: 6px; cursor: pointer; font-size: 16px; line-height: 1; }
+.hoverline { position: absolute; left: 50%; transform: translateX(-50%); top: 10px; max-width: calc(100% - 100px); font-size: 12px; color: var(--ink-2); background: color-mix(in srgb, var(--surface) 88%, transparent); padding: 3px 8px; border-radius: 6px; border: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,0.12); max-width: 260px; z-index: 5; }
+.tip b { font-size: 13px; }
+.tip .k { color: var(--muted); }
+.loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 14px; }
+
+.detail h3 { margin: 0; font-family: var(--font-display); font-stretch: 88%; font-weight: 700; font-size: 18px; text-wrap: balance; }
+.detail .sub { color: var(--muted); font-size: 12.5px; margin: 2px 0 8px; }
+.mono { font-family: var(--font-mono); font-size: 0.95em; }
+dl.facts { display: grid; grid-template-columns: 118px 1fr; gap: 3px 10px; margin: 0 0 10px; font-size: 13px; }
+dl.facts dt { color: var(--muted); }
+dl.facts dd { margin: 0; min-width: 0; }
+.tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.tbl th, .tbl td { padding: 4px 5px; text-align: right; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+.tbl th:first-child, .tbl td:first-child { text-align: left; white-space: normal; min-width: 7.5em; }
+.tbl thead th { color: var(--muted); font-weight: 600; font-size: 11.5px; }
+.tbl tr.on td { font-weight: 650; }
+.tablewrap { overflow-x: auto; }
+.chart { margin-top: 10px; }
+.chart .ct { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+.chart .cs { font-size: 11.5px; color: var(--muted); margin-bottom: 4px; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart .leg { display: flex; gap: 14px; font-size: 12px; color: var(--ink-2); margin: 4px 0; flex-wrap: wrap; }
+.chart .toggle { background: none; border: 0; padding: 2px 0; color: var(--accent); cursor: pointer; font-size: 12px; text-decoration: underline; text-underline-offset: 2px; }
+.list { display: grid; gap: 2px; }
+.list button { display: grid; grid-template-columns: 1fr auto; gap: 8px; text-align: left; padding: 5px 8px; border: 0; border-radius: 6px; background: transparent; cursor: pointer; font-size: 13px; }
+.list button:hover { background: var(--accent-wash); }
+.list button span:last-child { font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; }
+.chip i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+details > summary { cursor: pointer; font-family: var(--font-display); font-stretch: 85%; font-weight: 700; font-size: 15px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-2); }
+details > div { margin-top: 8px; }
+.notes p { margin: 0 0 8px; font-size: 13px; max-width: 62ch; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
+</style>
+
+<div class="app">
+  <header class="top">
+    <h1>NWI GW-ET Subsidy Explorer</h1>
+    <div class="run">Run <code>nwi_t1_final_20261018</code> · fields of 2026-08-20 · new DTW: handily parity, 30 m (2026-10-21), vs Ma et al. (2026) on the same grid · the run's own values for reference · 1985–2025 means over irrigated field-years, acre-ft/yr</div>
+  </header>
+  <div class="main">
+    <aside class="panel" id="panel">
+      <section aria-labelledby="h-map">
+        <h2 id="h-map">Map</h2>
+        <div class="row"><label for="model">f(d) model</label><select id="model"></select></div>
+        <div class="row" style="margin-top:6px"><label for="var">Colour fields by</label><select id="var"></select></div>
+        <div class="row" style="margin-top:6px"><label for="find">Find field</label><input id="find" type="search" placeholder="NWI_ID, e.g. NV_16742" autocomplete="off" spellcheck="false"></div>
+        <div class="note" id="findmsg"></div>
+      </section>
+      <section aria-labelledby="h-which">
+        <h2 id="h-which">Which fields</h2>
+        <div class="row"><label for="pop">Population</label>
+          <select id="pop"><option value="irr">Irrigated in at least one year (report)</option><option value="all">All fields</option></select></div>
+        <div class="checks">
+          <label class="check"><input type="checkbox" id="nv"> Nevada fields only</label>
+          <label class="check"><input type="checkbox" id="cov"> Only fields the Ma et al. map covers (like-for-like)</label>
+          <label class="check"><input type="checkbox" id="sub"> Only fields with a subsidy over 0.5 acre-ft/yr under either map</label>
+        </div>
+        <div class="slider"><div class="sv"><label for="chg">Large changes only, |new − Ma| at least</label><b id="chgv">off</b></div>
+          <input id="chg" type="range" min="0" max="200" step="1" value="0"></div>
+        <div class="slider"><div class="sv"><label for="km">No well data: nearest training well at least</label><b id="kmv">off</b></div>
+          <input id="km" type="range" min="0" max="30" step="0.5" value="0"></div>
+      </section>
+      <div class="summary" id="summary" aria-live="polite"></div>
+      <section aria-labelledby="h-layers">
+        <h2 id="h-layers">Layers</h2>
+        <div class="layers">
+          <label class="check"><input type="checkbox" id="lha" checked> Hydrographic area outlines</label>
+          <label class="check"><input type="checkbox" id="lhaf"> Hydrographic areas coloured by total change, new − Ma</label>
+          <label class="check"><input type="checkbox" id="lwell" checked> Training wells of the new DTW map</label>
+        </div>
+      </section>
+      <section class="detail" id="detail" aria-live="polite">
+        <h2>Selection</h2>
+        <p class="note">Click a field, a training well or a hydrographic area on the map.</p>
+      </section>
+      <details id="rank"><summary>Hydrographic areas with the largest change</summary><div id="rankbody"></div></details>
+      <details id="chk"><summary>Checks against the report</summary><div id="chkbody"></div></details>
+      <details><summary>Notes: what the numbers are</summary><div class="notes" id="notes"></div></details>
+    </aside>
+    <div class="mapwrap" id="mapwrap">
+      <canvas id="map" aria-label="Map of irrigated fields coloured by the selected value"></canvas>
+      <div class="hoverline" id="hoverline" hidden></div>
+      <div class="zoom"><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button><button id="zfit" aria-label="Show all fields">⤢</button></div>
+      <div class="legend" id="legend"></div>
+      <div class="tip" id="tip" hidden></div>
+      <div class="loading" id="loading">Loading 29,338 fields…</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+'use strict';
+
+// ---------- constants -------------------------------------------------------------------------
+var REPORT = { subsidyAll: 34733, etaAll: 1423458, nCovered: 16225, coveredNew: 24184, coveredMa: 18563, medianNew: 7.2, medianMa: 7.4, rLog: 0.68 };
+var MODELS = [
+  { key: 'TAN', label: 'Tan et al. (2025), used in the run' },
+  { key: 'BANTA', label: 'Banta (2000) linear' },
+  { key: 'AVER', label: 'Averianov (1956), p = 3' },
+  { key: 'SHAH', label: 'Shah et al. (2007)' }
+];
+var MODEL_NAME = { TAN: 'Tan', BANTA: 'Banta', AVER: 'Averianov', SHAH: 'Shah' };
+var SRC = { 1: 'Groundwater', 2: 'Surface water', 3: 'Mixed (GW + SW)' };
+var AVERIANOV_P = 3, SHAH_EPS = 0.02, ACRE_M2 = 4046.86;
+var YEARS = []; for (var y = 1985; y <= 2025; y++) YEARS.push(y);
+
+// Scales: class colours come from CSS tokens so both themes work.
+var SCALES = {
+  seq: { n: 7, token: '--seq-', order: [0, 1, 2, 3, 4, 5, 6] },
+  div: { n: 7, token: '--div-', order: [3, 2, 4, 1, 5, 0, 6] },
+  divr: { n: 7, token: '--div-', reverse: true, order: [3, 2, 4, 1, 5, 0, 6] },
+  dtw: { n: 7, token: '--dtw-', order: [6, 5, 4, 3, 2, 1, 0] },
+  vio: { n: 6, token: '--vio-', order: [0, 1, 2, 3, 4, 5] }
+};
+
+// ---------- small helpers ------------------------------------------------------------------------
+function $(id) { return document.getElementById(id); }
+function el(tag, attrs, text) {
+  var e = document.createElement(tag);
+  if (attrs) for (var k in attrs) { if (k === 'class') e.className = attrs[k]; else e.setAttribute(k, attrs[k]); }
+  if (text !== undefined && text !== null) e.textContent = text;
+  return e;
+}
+function svg(tag, attrs) {
+  var e = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  if (attrs) for (var k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+function fmt(x, d) {
+  if (x === null || x === undefined || !isFinite(x)) return '–';
+  d = d || 0;
+  return Number(x).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+function sfmt(x, d) { return (x > 0 ? '+' : '') + fmt(x, d); }
+function haTitle(i) { var n = H.name[i] ? H.name[i].replace(/([a-z])([A-Z])/g, '$1 $2') : '?'; return n + ' (' + H.code[i] + ')'; }
+function tok(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function median(a) { if (!a.length) return NaN; var s = a.slice().sort(function (p, q) { return p - q; }); var m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
+
+// ---------- data ---------------------------------------------------------------------------------
+var F, H, W, HY, META, FY = null, N = 0;
+var G = null, HG = null;   // field and hydrographic-area outlines (EPSG:5070 km)
+var col = {};        // typed views of the field columns
+var side;            // side in km of a square with the field's area (fields too small to outline)
+function sn(m) { return col['sn_' + m]; }
+function sm(m) { return col['sm_' + m]; }
+
+function load(name) {
+  return fetch('data/' + name + '.json').then(function (r) {
+    if (!r.ok) throw new Error('Could not load ' + name + '.json (' + r.status + ')');
+    return r.json();
+  });
+}
+
+// ---------- outlines: data/fields_geom.json (the 2026-08-20 GeoPackage) and data/has_geom.json -------------
+// Each holds, base64-encoded, a little-endian binary in EPSG:5070: Int32[8] header (magic 'NWIG', version 1,
+// features, rings, points, origin x, origin y, grid m); Uint32 first ring of each feature; Uint32 first point of
+// each ring; Int32 first point of each ring in grid steps from the origin; Int16 every other point as a step from
+// the previous one. Rings are open; exterior rings run counter-clockwise and holes clockwise, so a nonzero fill
+// leaves holes empty.
+function loadGeom(name) {
+  return load(name).then(function (o) {
+    if (o.format !== 'NWIG' || o.encoding !== 'base64') throw new Error(name + '.json is not an outline file');
+    var bin = atob(o.data), u = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    if (u.length !== o.bytes) throw new Error(name + '.json is incomplete');
+    return decodeGeom(u.buffer, name);
+  });
+}
+function decodeGeom(buf, name) {
+  var hd = new Int32Array(buf, 0, 8);
+  if (hd[0] !== 0x4E574947 || hd[1] !== 1) throw new Error(name + '.bin is not a version 1 outline file');
+  var nF = hd[2], nR = hd[3], nP = hd[4], ox = hd[5], oy = hd[6], q = hd[7], off = 32;
+  var fr = new Uint32Array(buf, off, nF + 1); off += 4 * (nF + 1);
+  var rp = new Uint32Array(buf, off, nR + 1); off += 4 * (nR + 1);
+  var first = new Int32Array(buf, off, 2 * nR); off += 8 * nR;
+  var dl = new Int16Array(buf, off, 2 * (nP - nR));
+  var xy = new Float64Array(2 * nP), d = 0, r, p, X, Y;
+  for (r = 0; r < nR; r++) {
+    X = first[2 * r]; Y = first[2 * r + 1]; p = rp[r];
+    xy[2 * p] = (ox + X * q) / 1000; xy[2 * p + 1] = (oy + Y * q) / 1000;
+    for (p = p + 1; p < rp[r + 1]; p++) {
+      X += dl[d++]; Y += dl[d++];
+      xy[2 * p] = (ox + X * q) / 1000; xy[2 * p + 1] = (oy + Y * q) / 1000;
+    }
+  }
+  var g = { n: nF, fr: fr, rp: rp, xy: xy, x0: new Float64Array(nF), y0: new Float64Array(nF), x1: new Float64Array(nF), y1: new Float64Array(nF) };
+  for (var i = 0; i < nF; i++) {
+    var a = Infinity, b = Infinity, c = -Infinity, e = -Infinity;
+    for (var k = rp[fr[i]]; k < rp[fr[i + 1]]; k++) {
+      var px = xy[2 * k], py = xy[2 * k + 1];
+      if (px < a) a = px;
+      if (px > c) c = px;
+      if (py < b) b = py;
+      if (py > e) e = py;
+    }
+    g.x0[i] = a; g.y0[i] = b; g.x1[i] = c; g.y1[i] = e;
+  }
+  return g;
+}
+// Adds feature i's rings to the current path in screen pixels, skipping points within half a pixel of the last one drawn.
+function geomPath(g, i) {
+  var xy = g.xy, rp = g.rp, k = view.k, hx = Wpx / 2 - view.cx * k, hy = Hpx / 2 + view.cy * k;
+  for (var r = g.fr[i]; r < g.fr[i + 1]; r++) {
+    var p0 = rp[r], p1 = rp[r + 1], lx = xy[2 * p0] * k + hx, ly = hy - xy[2 * p0 + 1] * k;
+    ctx.moveTo(lx, ly);
+    for (var p = p0 + 1; p < p1; p++) {
+      var X = xy[2 * p] * k + hx, Y = hy - xy[2 * p + 1] * k;
+      if (p < p1 - 1 && Math.abs(X - lx) + Math.abs(Y - ly) < 0.6) continue;
+      ctx.lineTo(X, Y); lx = X; ly = Y;
+    }
+    ctx.closePath();
+  }
+}
+function inGeom(g, i, x, y) {   // even-odd test over every ring of feature i (parts and holes)
+  var xy = g.xy, rp = g.rp, inside = false;
+  for (var r = g.fr[i]; r < g.fr[i + 1]; r++) {
+    for (var a = rp[r], b = rp[r + 1] - 1, j = b, k = a; k <= b; j = k++) {
+      var xk = xy[2 * k], yk = xy[2 * k + 1], xj = xy[2 * j], yj = xy[2 * j + 1];
+      if (((yk > y) !== (yj > y)) && (x < (xj - xk) * (y - yk) / (yj - yk) + xk)) inside = !inside;
+    }
+  }
+  return inside;
+}
+function edgeDist2(g, i, x, y) {   // squared distance (km2) from a point to the outline of feature i
+  var xy = g.xy, rp = g.rp, best = Infinity;
+  for (var r = g.fr[i]; r < g.fr[i + 1]; r++) {
+    for (var a = rp[r], b = rp[r + 1] - 1, j = b, k = a; k <= b; j = k++) {
+      var x1 = xy[2 * j], y1 = xy[2 * j + 1], vx = xy[2 * k] - x1, vy = xy[2 * k + 1] - y1, L = vx * vx + vy * vy;
+      var s = L > 0 ? Math.max(0, Math.min(1, ((x - x1) * vx + (y - y1) * vy) / L)) : 0;
+      var dx = x1 + s * vx - x, dy = y1 + s * vy - y, d2 = dx * dx + dy * dy;
+      if (d2 < best) best = d2;
+    }
+  }
+  return best;
+}
+var POLY_PX = 4;   // fields narrower than this on screen, both ways, are drawn as squares of their area
+function asSquare(i) { return (G.x1[i] - G.x0[i]) * view.k < POLY_PX && (G.y1[i] - G.y0[i]) * view.k < POLY_PX; }
+function cxOf(i) { return (G.x0[i] + G.x1[i]) / 2; }
+function cyOf(i) { return (G.y0[i] + G.y1[i]) / 2; }
+
+// ---------- the variables fields can be coloured by ------------------------------------------------
+var VARS = [
+  { key: 'chg', label: 'Subsidy change, new − Ma', unit: 'acre-ft/yr', scale: 'div', brk: [-100, -10, -1, 1, 10, 100], signed: true,
+    get: function (i, m) { return sn(m)[i] - sm(m)[i]; } },
+  { key: 'sNew', label: 'Subsidy, new DTW', unit: 'acre-ft/yr', scale: 'seq', brk: [1, 3, 10, 30, 100, 300],
+    get: function (i, m) { return sn(m)[i]; } },
+  { key: 'sMa', label: 'Subsidy, Ma et al.', unit: 'acre-ft/yr', scale: 'seq', brk: [1, 3, 10, 30, 100, 300],
+    get: function (i, m) { return col.mc[i] ? sm(m)[i] : NaN; } },
+  { key: 'pNew', label: 'Subsidy, new DTW, share of ETa', unit: '% of ETa', scale: 'seq', brk: [0.5, 1, 2, 5, 10, 20],
+    get: function (i, m) { return col.eta[i] > 0 ? 100 * sn(m)[i] / col.eta[i] : NaN; } },
+  { key: 'pChg', label: 'Subsidy change, share of ETa', unit: 'points of % of ETa', scale: 'div', brk: [-10, -2, -0.5, 0.5, 2, 10], signed: true,
+    get: function (i, m) { return col.eta[i] > 0 ? 100 * (sn(m)[i] - sm(m)[i]) / col.eta[i] : NaN; } },
+  { key: 'fNew', label: 'f, new DTW', unit: 'fraction of ETa', scale: 'seq', brk: [0.001, 0.01, 0.05, 0.1, 0.3, 0.6],
+    get: function (i, m) { return col['fn_' + m][i]; } },
+  { key: 'fMa', label: 'f, Ma et al.', unit: 'fraction of ETa', scale: 'seq', brk: [0.001, 0.01, 0.05, 0.1, 0.3, 0.6],
+    get: function (i, m) { return col.mc[i] ? col['fm_' + m][i] : NaN; } },
+  { key: 'dNew', label: 'Field-mean depth to groundwater, new', unit: 'm, darker = shallower', scale: 'dtw', brk: [1, 2, 3, 5, 10, 20],
+    get: function (i) { return col.dn[i]; } },
+  { key: 'dMa', label: 'Field-mean depth to groundwater, Ma et al.', unit: 'm, darker = shallower', scale: 'dtw', brk: [1, 2, 3, 5, 10, 20],
+    get: function (i) { return col.dm[i]; } },
+  { key: 'dChg', label: 'Depth change, new − Ma', unit: 'm, blue = new shallower', scale: 'divr', brk: [-5, -1, -0.25, 0.25, 1, 5], signed: true,
+    get: function (i) { return col.dn[i] - col.dm[i]; } },
+  { key: 'dRun', label: 'Field-mean depth to groundwater, run\'s map', unit: 'm, darker = shallower', scale: 'dtw', brk: [1, 2, 3, 5, 10, 20],
+    get: function (i) { return col.dr[i]; } },
+  { key: 'dRunChg', label: 'Depth change, new − run\'s map', unit: 'm, blue = new shallower', scale: 'divr', brk: [-5, -1, -0.25, 0.25, 1, 5], signed: true,
+    get: function (i) { return col.dn[i] - col.dr[i]; } },
+  { key: 'sig', label: 'Uncertainty of the run\'s map (sigma)', unit: 'm', scale: 'vio', brk: [2, 5, 10, 20, 50],
+    get: function (i) { return col.sg[i]; } },
+  { key: 'well', label: 'Distance to the nearest training well', unit: 'km', scale: 'vio', brk: [1, 2, 5, 10, 20],
+    get: function (i) { return col.wt[i]; } },
+  { key: 'vsRun', label: 'Tan, new DTW − the run (report)', unit: 'acre-ft/yr', scale: 'div', brk: [-100, -10, -1, 1, 10, 100], signed: true,
+    get: function (i) { return col.sn_TAN[i] - col.sr[i]; } },
+  { key: 'vsTan', label: 'Model − Tan, new DTW', unit: 'acre-ft/yr', scale: 'div', brk: [-100, -10, -1, 1, 10, 100], signed: true,
+    get: function (i, m) { return sn(m)[i] - col.sn_TAN[i]; } }
+];
+var VAR = {}; VARS.forEach(function (v) { VAR[v.key] = v; });
+
+function classOf(v, brk) { var c = 0; while (c < brk.length && v >= brk[c]) c++; return c; }
+function classLabels(v) {
+  var b = v.brk, out = [], f = function (x) { var a = Math.abs(x); var d = a < 0.01 ? 3 : a < 1 ? 2 : a < 10 && a % 1 ? 1 : 0; return v.signed ? sfmt(x, d) : fmt(x, d); };
+  out.push('below ' + f(b[0]));
+  for (var i = 1; i < b.length; i++) out.push(f(b[i - 1]) + ' to ' + f(b[i]));
+  out.push(f(b[b.length - 1]) + ' or more');
+  return out;
+}
+function scaleColors(scaleKey) {
+  var s = SCALES[scaleKey], cols = [];
+  for (var c = 0; c < s.n; c++) cols.push(tok(s.token + (s.reverse ? s.n - 1 - c : c)));
+  return cols;
+}
+function tokenFor(scaleKey, c) { var s = SCALES[scaleKey]; return 'var(' + s.token + (s.reverse ? s.n - 1 - c : c) + ')'; }
+
+// ---------- state ---------------------------------------------------------------------------------
+var S = { model: 'TAN', v: 'chg', pop: 'irr', nv: false, cov: false, sub: false, minChg: 0, minKm: 0,
+          ha: true, haFill: false, wells: true, sel: null };
+var shown = new Int32Array(0), shownCls = new Uint8Array(0), matchIdx = new Int32Array(0);
+var nvCode = -1;
+
+function applyFilters() {
+  var m = S.model, v = VAR[S.v], snm = sn(m), smm = sm(m);
+  var match = [], drawn = [], cls = [];
+  for (var i = 0; i < N; i++) {
+    if (S.pop === 'irr' && col.ni[i] === 0) continue;
+    if (S.nv && col.st[i] !== nvCode) continue;
+    if (S.cov && col.mc[i] !== 1) continue;
+    if (S.sub && !(snm[i] > 0.5 || smm[i] > 0.5)) continue;
+    if (S.minChg > 0 && Math.abs(snm[i] - smm[i]) < S.minChg) continue;
+    if (S.minKm > 0 && !(col.wt[i] >= S.minKm)) continue;
+    match.push(i);
+    var val = v.get(i, m);
+    if (val === null || !isFinite(val)) continue;
+    drawn.push(i); cls.push(classOf(val, v.brk));
+  }
+  matchIdx = Int32Array.from(match); shown = Int32Array.from(drawn); shownCls = Uint8Array.from(cls);
+  groups = null;
+}
+
+// ---------- map view ----------------------------------------------------------------------------------
+var canvas, ctx, Wpx = 0, Hpx = 0, dpr = 1;
+var view = { cx: 0, cy: 0, k: 1 };     // km at the centre, pixels per km
+var home = null;
+var groups = null, colorsCache = null, haPaths = null;
+
+function fitTo(b, pad) {
+  var w = Math.max(b[2] - b[0], 1), h = Math.max(b[3] - b[1], 1);
+  view.cx = (b[0] + b[2]) / 2; view.cy = (b[1] + b[3]) / 2;
+  view.k = Math.min((Wpx - 2 * pad) / w, (Hpx - 2 * pad) / h);
+}
+function sx(x) { return (x - view.cx) * view.k + Wpx / 2; }
+function sy(y) { return Hpx / 2 - (y - view.cy) * view.k; }
+function wx(px) { return (px - Wpx / 2) / view.k + view.cx; }
+function wy(py) { return view.cy - (py - Hpx / 2) / view.k; }
+
+function resize() {
+  var r = canvas.parentElement.getBoundingClientRect();
+  dpr = window.devicePixelRatio || 1;
+  Wpx = Math.max(1, r.width); Hpx = Math.max(1, r.height);
+  canvas.width = Math.round(Wpx * dpr); canvas.height = Math.round(Hpx * dpr);
+  if (!home && META) { fitTo(META.bounds_km, 24); home = { cx: view.cx, cy: view.cy, k: view.k }; }
+  requestDraw();
+}
+
+var drawPending = false;
+function requestDraw() { if (!drawPending) { drawPending = true; requestAnimationFrame(function () { drawPending = false; draw(); }); } }
+
+function buildGroups() {
+  var s = SCALES[VAR[S.v].scale];
+  groups = []; for (var c = 0; c < s.n; c++) groups.push([]);
+  for (var j = 0; j < shown.length; j++) groups[shownCls[j]].push(shown[j]);
+}
+
+function draw() {
+  if (!ctx || !F) return;
+  if (!groups) buildGroups();
+  var v = VAR[S.v], scale = SCALES[v.scale];
+  var colors = scaleColors(v.scale);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = tok('--surface'); ctx.fillRect(0, 0, Wpx, Hpx);
+
+  // hydrographic areas
+  if (S.haFill) {
+    var hcol = scaleColors('div'), m = S.model;
+    for (var h = 0; h < H.code.length; h++) {
+      if (!H.ni[h]) continue;
+      var d = H['sn_' + m][h] - H['sm_' + m][h];
+      ctx.fillStyle = hcol[classOf(d, [-1000, -100, -10, 10, 100, 1000])];
+      ctx.globalAlpha = 0.55; haPath(h); ctx.fill('evenodd'); ctx.globalAlpha = 1;
+    }
+  }
+  if (S.ha) {
+    ctx.strokeStyle = tok('--axis'); ctx.lineWidth = 1;
+    for (var h2 = 0; h2 < H.code.length; h2++) { haPath(h2); ctx.stroke(); }
+  }
+
+  // fields, class by class, strongest classes last: outlines once a field is POLY_PX across on screen,
+  // squares of the field's area below that so small fields stay visible
+  var minPx = view.k < 0.25 ? 1.6 : 2.2;
+  var vx0 = wx(-20), vx1 = wx(Wpx + 20), vy0 = wy(Hpx + 20), vy1 = wy(-20);
+  var edge = view.k >= 30 ? tok('--surface') : null;
+  for (var oi = 0; oi < scale.order.length; oi++) {
+    var c = scale.order[oi], g = groups[c];
+    if (!g || !g.length) continue;
+    ctx.fillStyle = colors[c];
+    var sq = [];
+    ctx.beginPath();
+    for (var j = 0; j < g.length; j++) {
+      var i = g[j];
+      if (G.x1[i] < vx0 || G.x0[i] > vx1 || G.y1[i] < vy0 || G.y0[i] > vy1) continue;
+      if (asSquare(i)) sq.push(i); else geomPath(G, i);
+    }
+    ctx.fill();   // nonzero: holes run against their outer ring and stay empty; overlapping fields stay filled
+    if (edge) { ctx.strokeStyle = edge; ctx.lineWidth = 1; ctx.stroke(); }
+    if (sq.length) {
+      ctx.beginPath();
+      for (var q = 0; q < sq.length; q++) {
+        var i3 = sq[q], px = sx(cxOf(i3)), py = sy(cyOf(i3)), s = Math.max(minPx, side[i3] * view.k);
+        ctx.rect(px - s / 2, py - s / 2, s, s);
+      }
+      ctx.fill();
+    }
+  }
+
+  // training wells: NDWR well logs as rings, monitoring wells as filled diamonds
+  if (S.wells) {
+    var ink = tok('--ink'), ink2 = tok('--ink-2'), surf = tok('--surface');
+    var zoomed = view.k > 1.2;
+    ctx.lineWidth = 1;
+    for (var w = 0; w < W.x.length; w++) {
+      var qx = sx(W.x[w]), qy = sy(W.y[w]);
+      if (qx < -5 || qy < -5 || qx > Wpx + 5 || qy > Hpx + 5) continue;
+      if (W.mon[w]) {
+        var r = zoomed ? 4 : 2.4;
+        ctx.beginPath(); ctx.moveTo(qx, qy - r); ctx.lineTo(qx + r, qy); ctx.lineTo(qx, qy + r); ctx.lineTo(qx - r, qy); ctx.closePath();
+        ctx.fillStyle = ink; ctx.fill(); if (zoomed) { ctx.strokeStyle = surf; ctx.stroke(); }
+      } else if (zoomed) {
+        ctx.beginPath(); ctx.arc(qx, qy, 2.6, 0, 2 * Math.PI); ctx.strokeStyle = ink2; ctx.stroke();
+      } else {
+        ctx.fillStyle = ink2; ctx.globalAlpha = 0.55; ctx.fillRect(qx - 0.6, qy - 0.6, 1.2, 1.2); ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  // selection
+  if (S.sel) {
+    ctx.lineWidth = 2;
+    if (S.sel.type === 'field') {
+      var i2 = S.sel.i;
+      if (asSquare(i2)) {
+        var px2 = sx(cxOf(i2)), py2 = sy(cyOf(i2)), s2 = Math.max(8, side[i2] * view.k + 6);
+        ctx.strokeStyle = tok('--surface'); ctx.lineWidth = 5; ctx.strokeRect(px2 - s2 / 2, py2 - s2 / 2, s2, s2);
+        ctx.strokeStyle = tok('--ink'); ctx.lineWidth = 2; ctx.strokeRect(px2 - s2 / 2, py2 - s2 / 2, s2, s2);
+      } else {
+        ctx.beginPath(); geomPath(G, i2); ctx.lineJoin = 'round';
+        ctx.strokeStyle = tok('--surface'); ctx.lineWidth = 5; ctx.stroke();
+        ctx.strokeStyle = tok('--ink'); ctx.lineWidth = 2; ctx.stroke();
+      }
+    } else if (S.sel.type === 'ha') {
+      ctx.strokeStyle = tok('--ink'); ctx.lineWidth = 2.5; haPath(S.sel.i); ctx.stroke();
+    } else if (S.sel.type === 'well') {
+      var wx2 = sx(W.x[S.sel.i]), wy2 = sy(W.y[S.sel.i]);
+      ctx.strokeStyle = tok('--surface'); ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(wx2, wy2, 8, 0, 2 * Math.PI); ctx.stroke();
+      ctx.strokeStyle = tok('--ink'); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(wx2, wy2, 8, 0, 2 * Math.PI); ctx.stroke();
+    }
+  }
+}
+
+function haPath(h) { ctx.beginPath(); geomPath(HG, h); }
+function inHa(h, x, y) {
+  if (x < HG.x0[h] || x > HG.x1[h] || y < HG.y0[h] || y > HG.y1[h]) return false;
+  return inGeom(HG, h, x, y);
+}
+function haAt(x, y) { for (var h = 0; h < H.code.length; h++) if (inHa(h, x, y)) return h; return -1; }
+
+// The drawn field under a screen point: the smallest outline that contains it, else the nearest square or
+// outline within `tol` pixels.
+function nearestField(px, py, tol) {
+  var x = wx(px), y = wy(py), t = tol / view.k, k2 = view.k * view.k, minPx = view.k < 0.25 ? 1.6 : 2.2;
+  var hit = -1, hitAc = Infinity, best = -1, bd = tol * tol;
+  for (var j = 0; j < shown.length; j++) {
+    var i = shown[j], d;
+    if (x < G.x0[i] - t || x > G.x1[i] + t || y < G.y0[i] - t || y > G.y1[i] + t) continue;
+    if (asSquare(i)) {
+      var half = Math.max(minPx, side[i] * view.k) / 2;
+      var ex = Math.max(0, Math.abs(sx(cxOf(i)) - px) - half), ey = Math.max(0, Math.abs(sy(cyOf(i)) - py) - half);
+      d = ex * ex + ey * ey;
+    } else if (inGeom(G, i, x, y)) {
+      if (col.ac[i] < hitAc) { hit = i; hitAc = col.ac[i]; }
+      continue;
+    } else d = edgeDist2(G, i, x, y) * k2;
+    if (d < bd || (d === 0 && bd === 0)) { bd = d; best = i; }
+  }
+  return hit >= 0 ? hit : best;
+}
+function nearestWell(px, py, tol) {
+  if (!S.wells) return -1;
+  var best = -1, bd = tol * tol;
+  for (var w = 0; w < W.x.length; w++) {
+    var dx = sx(W.x[w]) - px, dy = sy(W.y[w]) - py, d = dx * dx + dy * dy;
+    if (d < bd) { bd = d; best = w; }
+  }
+  return best;
+}
+
+// ---------- pointer: pan, zoom, hover, click ------------------------------------------------------------
+var pointers = {}, dragStart = null, moved = false, pinch = null;
+function onDown(e) {
+  canvas.setPointerCapture(e.pointerId);
+  pointers[e.pointerId] = { x: e.offsetX, y: e.offsetY };
+  var ids = Object.keys(pointers);
+  if (ids.length === 1) { dragStart = { x: e.offsetX, y: e.offsetY, cx: view.cx, cy: view.cy }; moved = false; }
+  if (ids.length === 2) {
+    var a = pointers[ids[0]], b = pointers[ids[1]];
+    pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), k: view.k, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+    pinch.wx = wx(pinch.mx); pinch.wy = wy(pinch.my); moved = true;
+  }
+}
+function onMove(e) {
+  if (pointers[e.pointerId]) pointers[e.pointerId] = { x: e.offsetX, y: e.offsetY };
+  var ids = Object.keys(pointers);
+  if (ids.length === 2 && pinch) {
+    var a = pointers[ids[0]], b = pointers[ids[1]];
+    var d = Math.hypot(a.x - b.x, a.y - b.y);
+    view.k = clampK(pinch.k * d / pinch.d);
+    view.cx = pinch.wx - (pinch.mx - Wpx / 2) / view.k; view.cy = pinch.wy + (pinch.my - Hpx / 2) / view.k;
+    requestDraw(); return;
+  }
+  if (ids.length === 1 && dragStart) {
+    var dx = e.offsetX - dragStart.x, dy = e.offsetY - dragStart.y;
+    if (Math.abs(dx) + Math.abs(dy) > 3) { moved = true; canvas.classList.add('dragging'); }
+    if (moved) { view.cx = dragStart.cx - dx / view.k; view.cy = dragStart.cy + dy / view.k; requestDraw(); hideTip(); }
+    return;
+  }
+  scheduleHover(e.offsetX, e.offsetY);
+}
+function onUp(e) {
+  delete pointers[e.pointerId];
+  if (Object.keys(pointers).length < 2) pinch = null;
+  canvas.classList.remove('dragging');
+  if (dragStart && !moved && Object.keys(pointers).length === 0) clickAt(e.offsetX, e.offsetY);
+  if (Object.keys(pointers).length === 0) dragStart = null;
+}
+function clampK(k) { return Math.max(home ? home.k * 0.5 : 0.01, Math.min(k, 400)); }
+function zoomAt(px, py, f) {
+  var x = wx(px), y = wy(py);
+  view.k = clampK(view.k * f);
+  view.cx = x - (px - Wpx / 2) / view.k; view.cy = y + (py - Hpx / 2) / view.k;
+  requestDraw();
+}
+var hoverQueued = null;
+function scheduleHover(px, py) {
+  var first = !hoverQueued;
+  hoverQueued = { x: px, y: py };
+  if (first) requestAnimationFrame(function () { var q = hoverQueued; hoverQueued = null; if (q) hover(q.x, q.y); });
+}
+function hover(px, py) {
+  var x = wx(px), y = wy(py), h = haAt(x, y), line = $('hoverline');
+  if (h >= 0) { line.hidden = false; line.textContent = haTitle(h); } else { line.hidden = true; }
+  var w = nearestWell(px, py, 6);
+  var i = w >= 0 ? -1 : nearestField(px, py, 6);
+  if (i >= 0) {
+    var v = VAR[S.v], val = v.get(i, S.model), m = S.model;
+    showTip(px, py, [['b', col.id[i]], ['', v.label + ': ' + valueText(v, val)],
+      ['k', 'New ' + fmt(sn(m)[i], 1) + ' · Ma ' + (col.mc[i] ? fmt(sm(m)[i], 1) : 'no map') + ' acre-ft/yr (' + MODEL_NAME[m] + ')']]);
+  } else if (w >= 0) {
+    showTip(px, py, [['b', (W.mon[w] ? 'Monitoring well ' : 'NDWR well log ') + W.id[w]], ['', 'Well depth to water ' + fmt(W.dtw[w], 1) + ' m'],
+      ['k', 'New map ' + fmt(W.dn[w], 1) + ' m · run\'s map ' + fmt(W.dr[w], 1) + ' m · Ma ' + fmt(W.dm[w], 1) + ' m']]);
+  } else hideTip();
+}
+function valueText(v, val) {
+  if (val === null || !isFinite(val)) return 'no value';
+  var d = Math.abs(val) < 0.01 ? 4 : Math.abs(val) < 1 ? 3 : Math.abs(val) < 100 ? 1 : 0;
+  return (v.signed ? sfmt(val, d) : fmt(val, d)) + ' ' + v.unit.split(',')[0];
+}
+function showTip(px, py, lines) {
+  var t = $('tip'); t.textContent = '';
+  lines.forEach(function (l) { var d = el(l[0] === 'b' ? 'b' : 'div', l[0] === 'k' ? { class: 'k' } : null, l[1]); t.appendChild(d); if (l[0] === 'b') t.appendChild(el('br')); });
+  t.hidden = false;
+  var tw = t.offsetWidth, th = t.offsetHeight;
+  t.style.left = Math.min(px + 14, Wpx - tw - 8) + 'px';
+  t.style.top = Math.max(8, Math.min(py + 14, Hpx - th - 8)) + 'px';
+}
+function hideTip() { $('tip').hidden = true; }
+
+function clickAt(px, py) {
+  var w = nearestWell(px, py, 7);
+  var i = w >= 0 ? -1 : nearestField(px, py, 7);
+  if (i >= 0) return selectField(i, false);
+  if (w >= 0) return selectWell(w);
+  var h = haAt(wx(px), wy(py));
+  if (h >= 0) return selectHa(h, false);
+  S.sel = null; renderDetailEmpty(); requestDraw();
+}
+
+// ---------- panel: summary, legend ---------------------------------------------------------------------------
+function updateSummary() {
+  var m = S.model, n = 0, s1 = 0, s2 = 0, e = 0, sr = 0;
+  for (var j = 0; j < matchIdx.length; j++) { var i = matchIdx[j]; n++; s1 += sn(m)[i]; s2 += sm(m)[i]; e += col.eta[i]; sr += col.sr[i]; }
+  var box = $('summary'); box.textContent = '';
+  var head = el('div', { class: 'big' });
+  head.appendChild(el('b', null, fmt(n))); head.appendChild(document.createTextNode(' fields match the filters'));
+  if (shown.length < n) head.appendChild(el('span', { class: 'note' }, ' (' + fmt(shown.length) + ' have a value to draw)'));
+  box.appendChild(head);
+  var nums = el('div', { class: 'nums' });
+  [['New DTW', s1, 'var(--new)'], ['Ma et al.', s2, 'var(--ma)'], ['Change', s1 - s2, null]].forEach(function (r) {
+    var d = el('div'); var lab = el('span');
+    if (r[2]) { var k = el('i', { class: 'key' }); k.style.background = r[2]; lab.appendChild(k); }
+    lab.appendChild(document.createTextNode(r[0]));
+    d.appendChild(lab); d.appendChild(el('b', null, (r[0] === 'Change' ? sfmt(r[1]) : fmt(r[1]))));
+    nums.appendChild(d);
+  });
+  box.appendChild(nums);
+  box.appendChild(el('div', { class: 'note' }, MODEL_NAME[m] + ', acre-ft/yr. ' + fmt(100 * s1 / Math.max(e, 1e-9), 2) + '% vs ' +
+    fmt(100 * s2 / Math.max(e, 1e-9), 2) + '% of their ETa (' + fmt(e) + ' acre-ft/yr). The run (report), Tan: ' + fmt(sr) + '.'));
+  var row = el('div', { class: 'btnrow' });
+  var copy = el('button', { class: 'btn', type: 'button' }, 'Copy these fields as CSV');
+  var msg = el('span', { class: 'note' });
+  copy.addEventListener('click', function () { copyCsv(msg); });
+  row.appendChild(copy); row.appendChild(msg); box.appendChild(row);
+}
+function copyCsv(msg) {
+  var m = S.model, head = ['NWI_ID', 'STATE', 'HYD_AREA', 'HA_NAME', 'WATER_RIGHT', 'ACRES', 'N_IRR_YRS', 'ETA_AF', 'DTW_NEW_M', 'DTW_MA_M', 'DTW_RUN_M', 'DTW_SIGMA_M',
+    'WT_DIST_KM', 'F_NEW_' + m, 'F_MA_' + m, 'S_NEW_' + m, 'S_MA_' + m, 'CHANGE_' + m, 'S_RUN_TAN'];
+  var lines = [head.join(',')];
+  for (var j = 0; j < matchIdx.length; j++) {
+    var i = matchIdx[j];
+    lines.push([col.id[i], META.states[col.st[i]], H.code[col.ha[i]], H.name[col.ha[i]], (SRC[col.src[i]] || '').replace(/,/g, ''), col.ac[i], col.ni[i],
+      col.eta[i], nz(col.dn[i]), nz(col.dm[i]), nz(col.dr[i]), nz(col.sg[i]), nz(col.wt[i]), col['fn_' + m][i], col['fm_' + m][i],
+      sn(m)[i], sm(m)[i], +(sn(m)[i] - sm(m)[i]).toFixed(4), col.sr[i]].join(','));
+  }
+  var text = lines.join('\n');
+  function fallback() {
+    var ta = el('textarea'); ta.value = text; ta.style.width = '100%'; ta.rows = 4; ta.readOnly = true;
+    msg.textContent = 'Copy was blocked here. Select the text below and copy it.';
+    msg.parentElement.parentElement.appendChild(ta); ta.focus(); ta.select();
+  }
+  try {
+    navigator.clipboard.writeText(text).then(function () { msg.textContent = 'Copied ' + fmt(matchIdx.length) + ' rows.'; }, fallback);
+  } catch (err) { fallback(); }
+}
+function nz(x) { return (x === null || !isFinite(x)) ? '' : x; }
+
+function updateLegend() {
+  var v = VAR[S.v], lg = $('legend'); lg.textContent = '';
+  lg.appendChild(el('div', { class: 't' }, v.label + (/^(chg|sNew|sMa|pNew|pChg|fNew|fMa|vsTan)$/.test(v.key) ? ' · ' + MODEL_NAME[S.model] : '')));
+  lg.appendChild(el('div', { class: 'note' }, v.unit));
+  var grid = el('div', { class: 'sw' }), labs = classLabels(v);
+  var counts = new Array(labs.length).fill(0); for (var j = 0; j < shownCls.length; j++) counts[shownCls[j]]++;
+  for (var c = labs.length - 1; c >= 0; c--) {
+    var sw = el('i'); sw.style.background = tokenFor(v.scale, c);
+    grid.appendChild(sw); grid.appendChild(el('span', null, labs[c] + '  (' + fmt(counts[c]) + ')'));
+  }
+  lg.appendChild(grid);
+  if (S.wells) {
+    var wl = el('div', { class: 'wl' });
+    wl.appendChild(el('span', null, '◆ monitoring well · ○ NDWR well log (training wells)'));
+    lg.appendChild(wl);
+  }
+}
+
+// ---------- detail panels ---------------------------------------------------------------------------------------
+function renderDetailEmpty() {
+  var d = $('detail'); d.textContent = '';
+  d.appendChild(el('h2', null, 'Selection'));
+  d.appendChild(el('p', { class: 'note' }, 'Click a field, a training well or a hydrographic area on the map.'));
+}
+function facts(rows) {
+  var dl = el('dl', { class: 'facts' });
+  rows.forEach(function (r) { dl.appendChild(el('dt', null, r[0])); var dd = el('dd'); if (r[1] instanceof Node) dd.appendChild(r[1]); else dd.textContent = r[1]; dl.appendChild(dd); });
+  return dl;
+}
+function table(headers, rows, onKey) {
+  var wrap = el('div', { class: 'tablewrap' }), t = el('table', { class: 'tbl' }), th = el('thead'), tr = el('tr');
+  headers.forEach(function (h) { tr.appendChild(el('th', { scope: 'col' }, h)); }); th.appendChild(tr); t.appendChild(th);
+  var tb = el('tbody');
+  rows.forEach(function (r) { var row = el('tr', r.on ? { class: 'on' } : null); r.cells.forEach(function (c) { row.appendChild(el('td', null, c)); }); tb.appendChild(row); });
+  t.appendChild(tb); wrap.appendChild(t); return wrap;
+}
+
+function selectField(i, zoom) {
+  S.sel = { type: 'field', i: i };
+  if (zoom) {   // the field about a quarter of the map wide
+    var fw = Math.max(G.x1[i] - G.x0[i], 0.05), fh = Math.max(G.y1[i] - G.y0[i], 0.05);
+    view.cx = cxOf(i); view.cy = cyOf(i); view.k = clampK(Math.min(Wpx / (4 * fw), Hpx / (4 * fh)));
+  }
+  requestDraw();
+  var d = $('detail'); d.textContent = '';
+  d.appendChild(el('h2', null, 'Selection'));
+  var h3 = el('h3'); h3.appendChild(el('span', { class: 'mono' }, col.id[i])); d.appendChild(h3);
+  d.appendChild(el('div', { class: 'sub' }, haTitle(col.ha[i]) + ' · ' + META.states[col.st[i]]));
+  var tex = col.tx[i] >= 0 ? META.textures[col.tx[i]] : (col.txm[i] >= 0 ? 'not sampled for the new map (Ma used ' + META.textures[col.txm[i]] + ')' : '–');
+  d.appendChild(facts([
+    ['Water right', (SRC[col.src[i]] || '–') + (col.as[i] ? ', assumed (no Nevada record)' : '')],
+    ['Crop', META.crops[col.crop[i]] || '–'],
+    ['Size', fmt(col.ac[i], 1) + ' acres; irrigated in ' + col.ni[i] + ' of 41 years'],
+    ['ETa', fmt(col.eta[i], 1) + ' acre-ft/yr (irrigated years)'],
+    ['Soil, roots', tex + '; roots ' + col.rc[i] + ' cm; ETo ' + fmt(col.e0[i], 2) + ' mm/d'],
+    ['Tan parameters', 'd_dec ' + fmt(col.dd[i], 2) + ' m, d_ext ' + fmt(col.de[i], 2) + ' m, p ' + fmt(col.p[i], 2)],
+    ['Depth, new', fmt(col.dn[i], 2) + ' m mean, ' + fmt(col.dnm[i], 2) + ' m min (30 m map)'],
+    ['Depth, Ma', col.mc[i] ? fmt(col.dm[i], 2) + ' m mean, ' + fmt(col.dmm[i], 2) + ' m min' : 'outside the Ma et al. map (Nevada only)'],
+    ['Depth, run\'s map', fmt(col.dr[i], 2) + ' m mean, ' + fmt(col.drm[i], 2) + ' m min; sigma ' + fmt(col.sg[i], 1) + ' m'],
+    ['Training wells', fmt(col.wt[i], 2) + ' km to the nearest (' + (col.wsrc[i] === 1 ? 'NDWR well log' : 'monitoring well') + ', ' + fmt(col.wdtw[i], 1) +
+      ' m to water); ' + col.wn1[i] + ' within 1 km, ' + col.wn5[i] + ' within 5 km'],
+    ['Other wells', 'any gwx well ' + fmt(col.wa[i], 2) + ' km; with a water-level series ' + fmt(col.wts[i], 2) + ' km']
+  ]));
+  var rows = ['TAN', 'BANTA', 'AVER', 'SHAH'].map(function (k) {
+    var smv = col['sm_' + k][i];
+    return { on: k === S.model, cells: [MODEL_NAME[k], fmt(col['fn_' + k][i], 3), col.mc[i] ? fmt(col['fm_' + k][i], 3) : '–',
+      fmt(col['sn_' + k][i], 1), col.mc[i] ? fmt(smv, 1) : '–', sfmt(col['sn_' + k][i] - smv, 1)] };
+  });
+  rows.push({ cells: ['Tan, the run (report)', fmt(col.fr[i], 3), '', fmt(col.sr[i], 1), '', ''] });
+  rows.push({ cells: ['Tan, run\'s map recomputed', fmt(col.f08[i], 3), '', fmt(col.s08[i], 1), '', ''] });
+  d.appendChild(table(['Model', 'f new', 'f Ma', 'New', 'Ma', 'Change'], rows));
+  d.appendChild(el('div', { class: 'note' }, 'Subsidy in acre-ft/yr. Field f is the coverage-weighted mean of f over the 30 m pixels touching the field, not f at the mean depth. The run used its 2026-10-08 100 m map; "recomputed" is this page\'s inputs on that map, so its gap to the run is the recomputation error and its gap to Tan above is the effect of the new map.'));
+  d.appendChild(fCurveChart(i));
+  var holder = el('div'); d.appendChild(holder);
+  annualField(i, holder);
+}
+
+function fOf(model, x, dd, de, p) {
+  if (model === 'BANTA') return Math.max(0, Math.min(1, 1 - x / de));
+  if (model === 'AVER') return Math.pow(Math.max(0, Math.min(1, 1 - x / de)), AVERIANOV_P);
+  var span = de - dd;
+  if (span <= 0) return x <= dd ? 1 : 0;
+  if (x <= dd) return 1;
+  if (model === 'SHAH') return Math.exp(-Math.log(1 / SHAH_EPS) / span * (x - dd));
+  if (x >= de) return 0;
+  return Math.pow((de - x) / span, p);
+}
+
+// line chart: one y axis, shared crosshair, legend for 2+ series, table view
+function lineChart(opts) {
+  var wrap = el('div', { class: 'chart' });
+  wrap.appendChild(el('div', { class: 'ct' }, opts.title));
+  if (opts.sub) wrap.appendChild(el('div', { class: 'cs' }, opts.sub));
+  if (opts.series.length > 1 || opts.refs) {
+    var leg = el('div', { class: 'leg' });
+    opts.series.concat(opts.refs || []).forEach(function (s) {
+      if (s.hideLegend) return;
+      var sp = el('span'), k = el('i', { class: 'key' }); k.style.background = s.color;
+      if (s.dash) { k.style.background = 'none'; k.style.height = '0'; k.style.borderTop = '2px dashed ' + s.color; }
+      sp.appendChild(k); sp.appendChild(document.createTextNode(s.name)); leg.appendChild(sp);
+    });
+    wrap.appendChild(leg);
+  }
+  var Wd = 360, Hd = opts.height || 170, L = 46, R = 10, T = 8, B = 26;
+  var xs = opts.x, xmin = opts.xmin !== undefined ? opts.xmin : xs[0], xmax = opts.xmax !== undefined ? opts.xmax : xs[xs.length - 1];
+  var ymax = opts.ymax;
+  if (ymax === undefined) { ymax = 0; opts.series.forEach(function (s) { s.values.forEach(function (v) { if (v !== null && v > ymax) ymax = v; }); }); }
+  var step = niceStep(ymax / 4 || 1), ytop = Math.max(step, Math.ceil(ymax / step) * step);
+  var X = function (v) { return L + (v - xmin) / (xmax - xmin || 1) * (Wd - L - R); };
+  var Y = function (v) { return T + (1 - v / ytop) * (Hd - T - B); };
+  var s = svg('svg', { viewBox: '0 0 ' + Wd + ' ' + Hd, role: 'img', 'aria-label': opts.title });
+  for (var t = 0; t <= ytop + 1e-9; t += step) {
+    var gl = svg('line', { x1: L, x2: Wd - R, y1: Y(t), y2: Y(t), 'stroke-width': 1 }); gl.style.stroke = t === 0 ? 'var(--axis)' : 'var(--grid)'; s.appendChild(gl);
+    var tl = svg('text', { x: L - 6, y: Y(t) + 3.5, 'text-anchor': 'end', 'font-size': 10 }); tl.style.fill = 'var(--axis-ink)'; tl.style.fontVariantNumeric = 'tabular-nums';
+    tl.textContent = fmt(t, step < 1 ? (step < 0.1 ? 2 : 1) : 0); s.appendChild(tl);
+  }
+  (opts.xticks || []).forEach(function (xt) {
+    var tx = svg('text', { x: X(xt), y: Hd - 8, 'text-anchor': 'middle', 'font-size': 10 }); tx.style.fill = 'var(--axis-ink)'; tx.textContent = opts.xfmt ? opts.xfmt(xt) : xt; s.appendChild(tx);
+  });
+  if (opts.xlabel) { var xl = svg('text', { x: Wd - R, y: Hd - 8, 'text-anchor': 'end', 'font-size': 10 }); xl.style.fill = 'var(--axis-ink)'; xl.textContent = ''; s.appendChild(xl); }
+  (opts.refs || []).forEach(function (rf) {
+    if (rf.x === null || !isFinite(rf.x) || rf.x < xmin || rf.x > xmax) return;
+    var ln = svg('line', { x1: X(rf.x), x2: X(rf.x), y1: T, y2: Hd - B, 'stroke-width': 2 }); ln.style.stroke = rf.color;
+    if (rf.dash) ln.setAttribute('stroke-dasharray', '4 3');
+    s.appendChild(ln);
+  });
+  opts.series.forEach(function (se) {
+    var d = '', pen = false;
+    se.values.forEach(function (v, k) {
+      if (v === null || !isFinite(v)) { pen = false; return; }
+      d += (pen ? 'L' : 'M') + X(xs[k]).toFixed(1) + ' ' + Y(Math.min(v, ytop)).toFixed(1); pen = true;
+    });
+    var p = svg('path', { d: d, fill: 'none', 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }); p.style.stroke = se.color;
+    if (se.dash) p.setAttribute('stroke-dasharray', '5 4');
+    s.appendChild(p);
+    if (se.dots) se.values.forEach(function (v, k) {
+      var isolated = v !== null && (k === 0 || se.values[k - 1] === null) && (k === se.values.length - 1 || se.values[k + 1] === null);
+      if (isolated) { var c = svg('circle', { cx: X(xs[k]), cy: Y(v), r: 3 }); c.style.fill = se.color; s.appendChild(c); }
+    });
+  });
+  var cross = svg('line', { y1: T, y2: Hd - B, 'stroke-width': 1, visibility: 'hidden' }); cross.style.stroke = 'var(--axis-ink)'; s.appendChild(cross);
+  var tip = el('div', { class: 'tip' }); tip.hidden = true; tip.style.position = 'absolute';
+  var box = el('div'); box.style.position = 'relative'; box.appendChild(s); box.appendChild(tip); wrap.appendChild(box);
+  s.addEventListener('pointermove', function (e) {
+    var r = s.getBoundingClientRect(), vx = (e.clientX - r.left) / r.width * Wd;
+    var best = 0, bd = Infinity; xs.forEach(function (xv, k) { var dd = Math.abs(X(xv) - vx); if (dd < bd) { bd = dd; best = k; } });
+    cross.setAttribute('x1', X(xs[best])); cross.setAttribute('x2', X(xs[best])); cross.setAttribute('visibility', 'visible');
+    tip.textContent = ''; tip.appendChild(el('div', { class: 'k' }, opts.xfmt ? opts.xfmt(xs[best]) : String(xs[best])));
+    opts.series.forEach(function (se) {
+      var row = el('div'), k = el('i', { class: 'key' }); k.style.background = se.color; row.appendChild(k);
+      row.appendChild(el('b', null, se.values[best] === null ? (se.missing || '–') : fmt(se.values[best], opts.dec === undefined ? 1 : opts.dec)));
+      row.appendChild(document.createTextNode(' ' + se.name)); tip.appendChild(row);
+    });
+    tip.hidden = false;
+    var px = (X(xs[best]) / Wd) * r.width;
+    tip.style.left = Math.min(px + 10, r.width - tip.offsetWidth - 2) + 'px'; tip.style.top = '4px';
+  });
+  s.addEventListener('pointerleave', function () { cross.setAttribute('visibility', 'hidden'); tip.hidden = true; });
+  // table view
+  var tg = el('button', { class: 'toggle', type: 'button' }, 'Show values');
+  var tv = el('div'); tv.hidden = true;
+  tg.addEventListener('click', function () {
+    if (!tv.firstChild) {
+      var rows = [];
+      xs.forEach(function (xv, k) { if (opts.tableEvery && k % opts.tableEvery) return; rows.push({ cells: [opts.xfmt ? opts.xfmt(xv) : String(xv)].concat(opts.series.map(function (se) { return se.values[k] === null ? '–' : fmt(se.values[k], opts.dec === undefined ? 2 : opts.dec + 1); })) }); });
+      tv.appendChild(table([opts.xname || ''].concat(opts.series.map(function (se) { return se.name; })), rows));
+    }
+    tv.hidden = !tv.hidden; tg.textContent = tv.hidden ? 'Show values' : 'Hide values';
+  });
+  wrap.appendChild(tg); wrap.appendChild(tv);
+  return wrap;
+}
+function niceStep(x) { var p = Math.pow(10, Math.floor(Math.log10(x))), n = x / p; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p; }
+
+function fCurveChart(i) {
+  var m = S.model, dmax = Math.max(4, Math.min(16, (col.de[i] || 6) * 1.05)), xs = [], vals = [], valsMa = [];
+  var sameParams = col.ddm[i] === col.dd[i] && col.dem[i] === col.de[i] && col.pm[i] === col.p[i];
+  for (var k = 0; k <= 120; k++) {
+    var x = dmax * k / 120; xs.push(x);
+    vals.push(fOf(m, x, col.dd[i], col.de[i], col.p[i]));
+    valsMa.push(col.ddm[i] === null ? null : fOf(m, x, col.ddm[i], col.dem[i], col.pm[i]));
+  }
+  var series = [{ name: 'f(depth), this field\'s parameters', color: 'var(--curve)', values: vals, hideLegend: false }];
+  if (!sameParams && col.mc[i]) series.push({ name: 'f(depth), parameters used with Ma', color: 'var(--axis-ink)', values: valsMa });
+  var ticks = []; var st = dmax > 10 ? 4 : 2; for (var t = 0; t <= dmax; t += st) ticks.push(t);
+  return lineChart({ title: MODEL_NAME[m] + ': f against depth to groundwater', sub: 'Lines mark the field-mean depth with each map.',
+    x: xs, xmin: 0, xmax: dmax, ymax: 1, series: series, xticks: ticks, xfmt: function (v) { return fmt(v, v % 1 ? 1 : 0) + ' m'; }, xname: 'Depth',
+    refs: [{ name: 'new DTW, field mean ' + fmt(col.dn[i], 2) + ' m', color: 'var(--new)', x: col.dn[i] },
+           { name: col.mc[i] ? 'Ma, field mean ' + fmt(col.dm[i], 2) + ' m' : 'Ma: no map here', color: 'var(--ma)', x: col.mc[i] ? col.dm[i] : null },
+           { name: 'run\'s map, field mean ' + fmt(col.dr[i], 2) + ' m', color: 'var(--axis-ink)', x: col.dr[i], dash: true }],
+    dec: 3, tableEvery: 10, height: 150 });
+}
+
+function annualField(i, holder) {
+  var go = function () {
+    var rec = FY[col.id[i]];
+    if (!rec) { holder.appendChild(el('p', { class: 'note' }, 'Annual series are included for fields with a Tan subsidy over 0.5 acre-ft/yr with the new map, Ma et al. or the run. This field has ' + fmt(col.sn_TAN[i], 2) + ' (new), ' + fmt(col.sm_TAN[i], 2) + ' (Ma) and ' + fmt(col.sr[i], 2) + ' (the run).')); return; }
+    holder.appendChild(lineChart({ title: 'Annual subsidy, Tan (acre-ft)', sub: 'Gaps are years IrrMapper does not count as irrigated; the report leaves them out.',
+      x: YEARS, series: [{ name: 'New DTW', color: 'var(--new)', values: rec.n, dots: true },
+        { name: 'Ma et al.', color: 'var(--ma)', values: col.mc[i] ? rec.m : rec.m.map(function () { return null; }), dots: true, missing: 'not irrigated or no map' },
+        { name: 'The run (report)', color: 'var(--axis-ink)', values: rec.r, dash: true }],
+      xticks: [1985, 1995, 2005, 2015, 2025], xname: 'Year', dec: 1 }));
+  };
+  if (FY) go();
+  else {
+    var wait = el('p', { class: 'note' }, 'Loading annual series…'); holder.appendChild(wait);
+    load('field_years').then(function (d) { FY = d; holder.removeChild(wait); if (S.sel && S.sel.type === 'field' && S.sel.i === i) go(); })
+      .catch(function (err) { wait.textContent = err.message; });
+  }
+}
+
+function selectHa(h, zoom) {
+  S.sel = { type: 'ha', i: h };
+  if (zoom) fitTo([HG.x0[h], HG.y0[h], HG.x1[h], HG.y1[h]], 40);
+  requestDraw();
+  var m = S.model, d = $('detail'); d.textContent = '';
+  d.appendChild(el('h2', null, 'Selection'));
+  d.appendChild(el('h3', null, haTitle(h)));
+  d.appendChild(el('div', { class: 'sub' }, 'Hydrographic area'));
+  d.appendChild(facts([
+    ['Fields', fmt(H.nf[h]) + ' in the layer, ' + fmt(H.ni[h]) + ' irrigated in at least one year'],
+    ['ETa', fmt(H.eta[h]) + ' acre-ft/yr'],
+    ['With a subsidy', fmt(H.nsn[h]) + ' fields (new), ' + fmt(H.nsm[h]) + ' (Ma), ' + fmt(H.nsr[h]) + ' (the run); Tan, over 0.5 acre-ft/yr'],
+    ['Depth to water', 'new ' + fmt(H.dn[h], 2) + ' m, Ma ' + fmt(H.dm[h], 2) + ' m (acre-weighted, ' + fmt(H.ncov[h]) + ' fields both maps cover)'],
+    ['Training wells', 'median ' + fmt(H.medwt[h], 1) + ' km from irrigated fields; ' + fmt(H.nfar5[h]) + ' fields over 5 km away carry ' + fmt(H.sfar5n[h]) + ' acre-ft/yr (new), ' + fmt(H.sfar5m[h]) + ' (Ma) and ' + fmt(H.sfar5r[h]) + ' (the run)']
+  ]));
+  var rows = ['TAN', 'BANTA', 'AVER', 'SHAH'].map(function (k) {
+    return { on: k === m, cells: [MODEL_NAME[k], fmt(H['sn_' + k][h]), fmt(H['sm_' + k][h]), sfmt(H['sn_' + k][h] - H['sm_' + k][h]), k === 'TAN' ? fmt(H.sm_rpt[h]) : ''] };
+  });
+  rows.push({ cells: ['Tan, the run (report)', fmt(H.sr[h]), '', '', ''] });
+  rows.push({ cells: ['Tan, run\'s map recomputed', fmt(H.s08[h]), '', '', ''] });
+  d.appendChild(table(['Model', 'New', 'Ma', 'Change', 'Ma, report'], rows));
+  d.appendChild(el('div', { class: 'note' }, 'Acre-ft/yr. "Ma, report" is docs/tables/ha_gw_subsidy_new_vs_ma.csv, made with the run\'s 2026-10-08 map and Ma et al. on its 100 m grid; this page uses the new 30 m map and Ma et al. on that grid (see Notes).'));
+  var hy = HY[H.code[h]];
+  if (hy) {
+    var hs = [{ name: 'New DTW', color: 'var(--new)', values: hy['S_NEW_' + m] }, { name: 'Ma et al.', color: 'var(--ma)', values: hy['S_MA_' + m] }];
+    if (m === 'TAN') hs.push({ name: 'The run (report)', color: 'var(--axis-ink)', values: hy.S_RUN_TAN, dash: true });
+    d.appendChild(lineChart({ title: 'Annual subsidy, irrigated fields, ' + MODEL_NAME[m] + ' (acre-ft)', x: YEARS, series: hs,
+      xticks: [1985, 1995, 2005, 2015, 2025], xname: 'Year', dec: 0 }));
+  }
+  // fields in this HA with the largest change
+  var idx = []; for (var i = 0; i < N; i++) if (col.ha[i] === h && col.ni[i] > 0) idx.push(i);
+  idx.sort(function (a, b) { return Math.abs(sn(m)[b] - sm(m)[b]) - Math.abs(sn(m)[a] - sm(m)[a]); });
+  if (idx.length) {
+    d.appendChild(el('div', { class: 'ct', style: 'margin-top:10px;font-weight:600;font-size:13px' }, 'Fields with the largest change'));
+    var list = el('div', { class: 'list' });
+    idx.slice(0, 8).forEach(function (i2) {
+      var b = el('button', { type: 'button' });
+      b.appendChild(el('span', { class: 'mono' }, col.id[i2]));
+      b.appendChild(el('span', null, sfmt(sn(m)[i2] - sm(m)[i2], 1) + ' · well ' + fmt(col.wt[i2], 1) + ' km'));
+      b.addEventListener('click', function () { selectField(i2, true); });
+      list.appendChild(b);
+    });
+    d.appendChild(list);
+  }
+}
+
+function selectWell(w) {
+  S.sel = { type: 'well', i: w };
+  requestDraw();
+  var d = $('detail'); d.textContent = '';
+  d.appendChild(el('h2', null, 'Selection'));
+  var h3 = el('h3'); h3.appendChild(document.createTextNode(W.mon[w] ? 'Monitoring well ' : 'NDWR well log ')); h3.appendChild(el('span', { class: 'mono' }, W.id[w])); d.appendChild(h3);
+  d.appendChild(el('div', { class: 'sub' }, 'A training well of the handily DTW maps (source ' + W.src[w] + ')'));
+  d.appendChild(facts([
+    ['Well depth to water', fmt(W.dtw[w], 2) + ' m'],
+    ['New map, this pixel', fmt(W.dn[w], 2) + ' m; map − well ' + sfmt(W.dn[w] - W.dtw[w], 2) + ' m'],
+    ['Run\'s map, this pixel', fmt(W.dr[w], 2) + ' m (sigma ' + fmt(W.sg[w], 1) + ' m); map − well ' + sfmt(W.dr[w] - W.dtw[w], 2) + ' m'],
+    ['Ma, this pixel', W.dm[w] === null ? 'outside the Ma map' : fmt(W.dm[w], 2) + ' m; map − well ' + sfmt(W.dm[w] - W.dtw[w], 2) + ' m']
+  ]));
+  d.appendChild(el('p', { class: 'note' }, 'Both handily maps were fitted to these wells, so their differences here are not an independent check.'));
+}
+
+// ---------- rankings, checks, notes --------------------------------------------------------------------------------
+function renderRanking() {
+  var b = $('rankbody'), m = S.model; b.textContent = '';
+  var list = [];
+  for (var h = 0; h < H.code.length; h++) if (H.ni[h]) list.push({ h: h, d: H['sn_' + m][h] - H['sm_' + m][h] });
+  b.appendChild(el('p', { class: 'note' }, 'Total change, new − Ma, over irrigated fields, ' + MODEL_NAME[m] + ', acre-ft/yr.'));
+  [['Largest decreases (new below Ma)', list.slice().sort(function (a, c) { return a.d - c.d; })],
+   ['Largest increases (new above Ma)', list.slice().sort(function (a, c) { return c.d - a.d; })]].forEach(function (g) {
+    b.appendChild(el('div', { style: 'font-weight:600;font-size:13px;margin:6px 0 2px' }, g[0]));
+    var lst = el('div', { class: 'list' });
+    g[1].slice(0, 8).forEach(function (r) {
+      var bt = el('button', { type: 'button' });
+      bt.appendChild(el('span', null, haTitle(r.h)));
+      bt.appendChild(el('span', null, sfmt(r.d) + ' · wells ' + fmt(H.medwt[r.h], 1) + ' km'));
+      bt.addEventListener('click', function () { selectHa(r.h, true); });
+      lst.appendChild(bt);
+    });
+    b.appendChild(lst);
+  });
+}
+function renderChecks() {
+  var sRun = 0, eAll = 0, s08 = 0, sNew = 0, cN = 0, cM = 0, dN = [], dM = [];
+  for (var i = 0; i < N; i++) {
+    if (!col.ni[i]) continue;
+    sRun += col.sr[i]; eAll += col.eta[i]; s08 += col.s08[i]; sNew += col.sn_TAN[i];
+    if (col.mc[i]) { cN += col.sn_TAN[i]; cM += col.sm_TAN[i]; dN.push(col.dn[i]); dM.push(col.dm[i]); }
+  }
+  var lx = dN.map(function (v) { return Math.log(Math.max(v, 0.1)); }), ly = dM.map(function (v) { return Math.log(Math.max(v, 0.1)); });
+  var r = corr(lx, ly);
+  var rows = [
+    ['Tan, the run, all fields', sRun, REPORT.subsidyAll, 0, true],
+    ['ETa, irrigated field-years', eAll, REPORT.etaAll, 0, true],
+    ['Tan, run\'s map recomputed', s08, REPORT.subsidyAll, 0, false],
+    ['Tan, new DTW, all fields', sNew, REPORT.subsidyAll, 0, false],
+    ['Fields both maps cover', dN.length, REPORT.nCovered, 0, false],
+    ['Covered fields, Tan, new', cN, REPORT.coveredNew, 0, false],
+    ['Covered fields, Tan, Ma', cM, REPORT.coveredMa, 0, false],
+    ['Median field depth, new (m)', median(dN), REPORT.medianNew, 1, false],
+    ['Median field depth, Ma (m)', median(dM), REPORT.medianMa, 1, false],
+    ['r, log field depths', r, REPORT.rLog, 2, false]
+  ];
+  var b = $('chkbody'); b.textContent = '';
+  b.appendChild(el('p', { class: 'note' }, 'Computed in this page from its data and compared with README.md, docs/GW_SUBSIDY.md and the Fig. 11 title.'));
+  var wrap = el('div', { class: 'tablewrap' }), t = el('table', { class: 'tbl' });
+  var hd = el('tr'); ['', 'App', 'Report', ''].forEach(function (h) { hd.appendChild(el('th', { scope: 'col' }, h)); });
+  var th = el('thead'); th.appendChild(hd); t.appendChild(th);
+  var tb = el('tbody');
+  rows.forEach(function (rw) {
+    var same = Number(rw[1]).toFixed(rw[3]) === Number(rw[2]).toFixed(rw[3]);
+    var tr = el('tr'); tr.appendChild(el('td', null, rw[0])); tr.appendChild(el('td', null, fmt(rw[1], rw[3]))); tr.appendChild(el('td', null, fmt(rw[2], rw[3])));
+    var chip = el('span', { class: 'chip' }), dot = el('i'); dot.style.background = same ? 'var(--good)' : 'var(--warning)'; chip.appendChild(dot);
+    chip.appendChild(document.createTextNode(same ? '✓ same' : (rw[4] ? '✕ differs' : '≈ see note'))); var td = el('td'); td.appendChild(chip); tr.appendChild(td);
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb); wrap.appendChild(t); b.appendChild(wrap);
+  b.appendChild(el('p', { class: 'note', style: 'margin-top:8px' }, 'The run\'s own values match the report exactly. The report used the run\'s 2026-10-08 100 m map with Ma et al. on that grid; ' +
+    'this page uses the new 30 m map with Ma et al. on the 30 m grid, so the other lines are not expected to match. "Run\'s map recomputed" is this page\'s inputs on the run\'s map: ' +
+    'its gap to the run (+0.75%) is the recomputation error, mostly growing-season ETo in Lovelock Valley (073), Carson Desert (101) and Marys River (042). ' +
+    'The Fig. 11 title prints the medians as "Ma vs new"; docs/GW_SUBSIDY.md on the branch has them as new 7.2 m, Ma 7.4 m.'));
+}
+function corr(a, b) {
+  var n = a.length, ma = 0, mb = 0; for (var i = 0; i < n; i++) { ma += a[i]; mb += b[i]; } ma /= n; mb /= n;
+  var sab = 0, saa = 0, sbb = 0; for (var j = 0; j < n; j++) { var x = a[j] - ma, y = b[j] - mb; sab += x * y; saa += x * x; sbb += y * y; }
+  return sab / Math.sqrt(saa * sbb);
+}
+function renderNotes() {
+  var n = $('notes'); n.textContent = '';
+  [
+    'Subsidy: each month, min(f × ETa, max(ETa − effective precipitation, 0)); summed over the field-years IrrMapper marks more than 50% irrigated and divided by 41 years (1985–2025). Acre-ft/yr, as in the report.',
+    'f is the fraction of ETa groundwater can supply. Tan et al. (2025) parameters (d_dec, d_ext, p) come from the field\'s POLARIS texture (0–100 cm), rooting depth (200 cm for alfalfa, orchards, vineyards, forest, shrubland and wetlands; 100 cm otherwise) and April–October ETo. Banta (d_dec = 0, p = 1), Averianov (d_dec = 0, p = 3) and Shah (exponential, f = 0.02 at d_ext) use the same d_ext.',
+    'New DTW: the handily NV parity map at 30 m, gs://ucrc-wtd/handily/nv/handily_dtw_nv_parity_30m.tif (2026-10-21). Every value with it, and with Ma et al., is computed with the run\'s code (scripts/gw_subsidy) on the same 2026-08-20 fields. Field f is the coverage-weighted mean of f over the 30 m pixels touching the field; fields with no pixel shallower than 16 m have f = 0.',
+    'The run (the report) used the 2026-10-08 statewide 100 m build of the same model. Its own Tan values are shown as "the run" and reproduce README.md and docs/tables/ha_gw_subsidy_new_vs_ma.csv exactly. The same code with this page\'s inputs on that map totals ' + fmt(META.summary.totals.S_R08_TAN) + ' acre-ft/yr against the run\'s 34,733 (+0.75%): the recomputation error. The uncertainty (sigma) is that build\'s; the bucket has none for the 30 m map.',
+    'Ma et al. (2026) is averaged from its 24 m grid onto the new map\'s 30 m grid and covers Nevada only, so fields outside Nevada have no Ma value. Use "Only fields the Ma et al. map covers" for like-for-like totals. The report averaged Ma onto the run\'s 100 m grid, which hides narrow shallow areas: its Ma total is 18,563 acre-ft/yr against ' + fmt(META.summary.totals.S_MA_TAN) + ' on the 30 m grid.',
+    'Training wells are the 9,448 wells the handily NV parity model was fitted to (handily_wells_train_nv_parity.csv): 8,628 NDWR well-log depths and 820 monitoring wells. Distances run from the field boundary; 0 means a well inside the field. The new map is within a median 1.9 m of them and 5.9 m of other wells (the run\'s map: 1.8 and 6.0 m).',
+    'Fields are drawn with their boundaries from ' + META.geom.source + ' (data last changed ' + META.geom.last_change + '), simplified by up to ' + META.geom.simplify_m + ' m on a ' + META.geom.grid_m + ' m grid, so every outline drawn is within ' + fmt(META.geom.max_error_m, 1) + ' m of the file\'s. Fields narrower than ' + POLY_PX + ' pixels on screen are drawn as squares of their area so they stay visible. Hydrographic areas are ' + META.geom.ha_source + ', within ' + fmt(META.geom.ha_max_error_m, 1) + ' m. The DTW rasters and f for every pixel are in the Earth Engine app (gee/nwi_gw_et_explorer_app.js on branch gw-subsidy-assessments).'
+  ].forEach(function (t) { n.appendChild(el('p', null, t)); });
+}
+
+// ---------- wiring --------------------------------------------------------------------------------------------------
+function refresh(keepDetail) {
+  applyFilters(); updateSummary(); updateLegend(); requestDraw();
+  if (document.getElementById('rank').open) renderRanking();
+  if (!keepDetail && S.sel) { if (S.sel.type === 'field') selectField(S.sel.i, false); else if (S.sel.type === 'ha') selectHa(S.sel.i, false); }
+}
+
+function init(meta, fields, has, wells, hy, geom, hgeom) {
+  META = meta; F = fields; H = has; W = wells; HY = hy; N = F.id.length; G = geom; HG = hgeom;
+  if (G.n !== N) throw new Error('fields_geom.bin has ' + G.n + ' fields and fields.json ' + N);
+  if (HG.n !== H.code.length) throw new Error('has_geom.bin has ' + HG.n + ' areas and has.json ' + H.code.length);
+  ['st', 'ha', 'src', 'as', 'crop', 'ni', 'tx', 'txm', 'rc', 'mc', 'wn1', 'wn5', 'wsrc'].forEach(function (k) { col[k] = Int32Array.from(F[k]); });
+  ['ac', 'e0', 'dd', 'de', 'p', 'ddm', 'dem', 'pm', 'dn', 'dnm', 'sg', 'dm', 'dmm', 'dr', 'drm', 'eta', 'wt', 'wdtw', 'wa', 'wts', 'fr', 'sr', 'f08', 's08'].forEach(function (k) {
+    col[k] = Float64Array.from(F[k].map(function (v) { return v === null ? NaN : v; }));
+  });
+  Object.keys(F).forEach(function (k) { if (/^(fn_|fm_|sn_|sm_)/.test(k)) col[k] = Float64Array.from(F[k].map(function (v) { return v === null ? NaN : v; })); });
+  ['ddm', 'dem', 'pm'].forEach(function (k) { col[k] = F[k]; });  // keep nulls for the curve test
+  col.id = F.id;
+  nvCode = META.states.indexOf('NV');
+  side = new Float64Array(N); for (var i = 0; i < N; i++) side[i] = Math.sqrt(Math.max(col.ac[i], 0) * ACRE_M2) / 1000;
+  // controls
+  var ms = $('model'); MODELS.forEach(function (m) { ms.appendChild(el('option', { value: m.key }, m.label)); });
+  var vs = $('var'); VARS.forEach(function (v) { vs.appendChild(el('option', { value: v.key }, v.label)); });
+  ms.addEventListener('change', function () { S.model = ms.value; renderRanking(); refresh(); });
+  vs.addEventListener('change', function () { S.v = vs.value; refresh(true); });
+  $('pop').addEventListener('change', function (e) { S.pop = e.target.value; refresh(true); });
+  [['nv', 'nv'], ['cov', 'cov'], ['sub', 'sub']].forEach(function (p) { $(p[0]).addEventListener('change', function (e) { S[p[1]] = e.target.checked; refresh(true); }); });
+  var chg = $('chg'), km = $('km');
+  chg.addEventListener('input', function () { S.minChg = +chg.value; $('chgv').textContent = S.minChg ? S.minChg + ' acre-ft/yr' : 'off'; refresh(true); });
+  km.addEventListener('input', function () { S.minKm = +km.value; $('kmv').textContent = S.minKm ? S.minKm + ' km' : 'off'; refresh(true); });
+  $('lha').addEventListener('change', function (e) { S.ha = e.target.checked; requestDraw(); });
+  $('lhaf').addEventListener('change', function (e) { S.haFill = e.target.checked; requestDraw(); });
+  $('lwell').addEventListener('change', function (e) { S.wells = e.target.checked; updateLegend(); requestDraw(); });
+  $('rank').addEventListener('toggle', function () { if ($('rank').open) renderRanking(); });
+  $('chk').addEventListener('toggle', function () { if ($('chk').open && !$('chkbody').firstChild) renderChecks(); });
+  var ids = {}; for (var j = 0; j < N; j++) ids[col.id[j].toUpperCase()] = j;
+  $('find').addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter') return;
+    var q = e.target.value.trim().toUpperCase(), i2 = ids[q];
+    if (i2 === undefined) { $('findmsg').textContent = 'No field ' + e.target.value.trim() + ' in the 2026-08-20 layer.'; return; }
+    $('findmsg').textContent = ''; selectField(i2, true);
+  });
+  // map
+  canvas = $('map'); ctx = canvas.getContext('2d');
+  canvas.addEventListener('pointerdown', onDown); canvas.addEventListener('pointermove', onMove);
+  canvas.addEventListener('pointerup', onUp); canvas.addEventListener('pointercancel', onUp);
+  canvas.addEventListener('pointerleave', function () { hideTip(); $('hoverline').hidden = true; });
+  canvas.addEventListener('wheel', function (e) { e.preventDefault(); zoomAt(e.offsetX, e.offsetY, Math.exp(-e.deltaY * 0.0015)); }, { passive: false });
+  $('zin').addEventListener('click', function () { zoomAt(Wpx / 2, Hpx / 2, 1.6); });
+  $('zout').addEventListener('click', function () { zoomAt(Wpx / 2, Hpx / 2, 1 / 1.6); });
+  $('zfit').addEventListener('click', function () { if (home) { view.cx = home.cx; view.cy = home.cy; view.k = home.k; requestDraw(); } });
+  new ResizeObserver(resize).observe($('mapwrap'));
+  var mq = window.matchMedia('(prefers-color-scheme: dark)');
+  if (mq.addEventListener) mq.addEventListener('change', requestDraw);
+  new MutationObserver(requestDraw).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class', 'style'] });
+  renderNotes();
+  $('loading').hidden = true;
+  resize();
+  refresh(true);
+}
+
+Promise.all(['meta', 'fields', 'has', 'wells', 'ha_years'].map(load).concat([loadGeom('fields_geom'), loadGeom('has_geom')]))
+  .then(function (d) { init(d[0], d[1], d[2], d[3], d[4], d[5], d[6]); })
+  .catch(function (err) { $('loading').textContent = 'The map data did not load: ' + err.message + '. Reload the page to try again.'; });
+})();
+</script>
