@@ -17,7 +17,7 @@ marks more than half of the field as irrigated.
 |---|---|
 | GW-ET subsidy, all fields | 34,733 acre-ft/yr (2.4% of ETa) |
 | Fields covered by both maps (16,225 irrigated fields) | new map 24,184 acre-ft/yr; Ma et al. 18,563 acre-ft/yr |
-| Median of the field-average depth to groundwater (fields covered by both maps) | new 7.4 m; Ma 7.2 m |
+| Median of the field-average depth to groundwater (fields covered by both maps) | new 7.2 m; Ma 7.4 m |
 | Correlation between the two maps' field-average depths (on a log scale) | 0.68 |
 | Table by HA | `docs/tables/ha_gw_subsidy_new_vs_ma.csv` |
 
@@ -36,7 +36,8 @@ field's ETa. Compared with Ma et al., the new map gives:
 ![Depth-to-groundwater comparison](images/fig11_dtw_new_vs_ma.png)
 
 **Fig. 11.**
-- **Field-average depth to groundwater.** The two maps have similar medians (7.4 vs 7.2 m).
+- **Field-average depth to groundwater.** The two maps have similar medians (new 7.2 m, Ma 7.4 m;
+  the figure title gives Ma first).
   The new map is shallower in the northern meadows (South Fork Owyhee 2 vs 7 m, Salmon
   Falls 2 vs 8 m), deeper in Lovelock (6 vs 2 m), and deeper in many central basins.
 - **HA averages.** Depth to groundwater averaged over each HA's fields, weighted by field
