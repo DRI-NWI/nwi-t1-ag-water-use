@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+"""
+GEE app input 7: upload the app's tables and rasters to Earth Engine.
+
+Copies the files from steps 3 and 6 to Cloud Storage (gs://<bucket>/nwi_gw_subsidy/<run_id>/) and
+ingests them as Earth Engine assets under projects/<project>/assets/nwi_gw_subsidy/. Every CSV
+column gets an explicit type, so codes such as HYD_AREA "014" stay strings. Each asset records where
+it came from in its properties.
+
+Usage:
+    python 07_upload_assets.py [--project nwi-usgs] [--bucket nwi-usgs-gee-exports] [--overwrite] [--out DIR]
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import time
+from pathlib import Path
+
+import pandas as pd
+
+from _common import CFG, REPO, out_dir
+
+RUN_ID = CFG["run"]["run_id"]
+SUFFIX = RUN_ID.rsplit("_", 1)[-1]                   # 20261018
+STRING_COLS = {"NWI_ID", "STATE", "HYD_AREA", "HA_NAME", "SRC", "CROP_LBL", "TEXTURE", "TEXTURE_MA",
+               "WT_NEAR_ID", "WT_NEAR_SRC", "canonical_id", "source", "source_well_id", "confine",
+               "well_class", "role", "h_accuracy_class", "confinement_class", "well_use"}
+LONG_COLS = {"YEAR", "IRR", "IRR_SRC", "SRC_ASSUMED", "CROP", "N_IRR_YRS", "MA_COVER", "ROOT_CM", "WT_N1KM",
+             "WT_N5KM", "N_FIELDS", "N_IRR", "N_SUB_NEW", "N_SUB_MA", "N_COVER", "N_FAR5", "obs_count",
+             "has_time_series", "is_train", "por_start_year", "por_end_year", "row_id"}
+
+
+def credentials(project):
+    """User credentials from the Earth Engine login (Earth Engine and Cloud Storage scopes)."""
+    from google.oauth2.credentials import Credentials
+    import google.auth.transport.requests as gr
+    c = json.loads(Path(os.path.expanduser("~/.config/earthengine/credentials")).read_text())
+    creds = Credentials(None, refresh_token=c["refresh_token"], client_id=c["client_id"],
+                        client_secret=c["client_secret"], token_uri="https://oauth2.googleapis.com/token",
+                        quota_project_id=project)
+    creds.refresh(gr.Request())
+    return creds
+
+
+def git_commit():
+    """Short commit of the repository, read from .git (the git binary is not always callable)."""
+    try:
+        git = REPO / ".git"
+        head = (git / "HEAD").read_text().strip()
+        if not head.startswith("ref:"):
+            return head[:7]
+        ref = head.split(" ", 1)[1]
+        if (git / ref).exists():
+            return (git / ref).read_text().strip()[:7]
+        for line in (git / "packed-refs").read_text().splitlines():
+            if line.endswith(" " + ref):
+                return line[:7]
+    except Exception:
+        pass
+    try:
+        return subprocess.check_output(["git", "-C", str(REPO), "rev-parse", "--short", "HEAD"], text=True).strip()
+    except Exception:
+        return "unknown"
+
+
+def column_types(csv_path: Path):
+    """columnDataTypeOverrides for every column of a CSV (geometry column left to ingestion)."""
+    cols = pd.read_csv(csv_path, nrows=0).columns
+    types = {}
+    for c in cols:
+        if c == "geometry":
+            continue
+        if c in STRING_COLS:
+            types[c] = "COLUMN_DATA_TYPE_STRING"
+        elif c in LONG_COLS:
+            types[c] = "COLUMN_DATA_TYPE_LONG"
+        else:
+            types[c] = "COLUMN_DATA_TYPE_NUMERIC"
+    return types
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--project", default="nwi-usgs")
+    ap.add_argument("--bucket", default="nwi-usgs-gee-exports")
+    ap.add_argument("--overwrite", action="store_true", help="replace assets that already exist")
+    ap.add_argument("--only", nargs="*", default=None, help="asset names to (re)ingest; default all")
+    ap.add_argument("--out", default=None)
+    args = ap.parse_args()
+    out = out_dir(args.out)
+    app, rdir = out / "app", out / "rasters"
+    summary = json.loads((app / "app_summary.json").read_text())
+
+    import ee
+    from google.cloud import storage
+    creds = credentials(args.project)
+    ee.Initialize(project=args.project, credentials=creds)
+    gcs = storage.Client(project=args.project, credentials=creds).bucket(args.bucket)
+    root = f"projects/{args.project}/assets/nwi_gw_subsidy"
+    prefix = f"nwi_gw_subsidy/{RUN_ID}"
+    try:
+        ee.data.getAsset(root)
+    except ee.EEException:
+        ee.data.createAsset({"type": "FOLDER"}, root)
+        print(f"[ee] created folder {root}")
+
+    common = {"run_id": RUN_ID, "repo_commit": git_commit(), "created_by": "gee/prep/07_upload_assets.py",
+              "field_boundaries": "nevada_agricultural_field_boundaries_20260820 "
+                                  "(projects/ee-prevelle/assets/NWI/nevada_agricultural_field_boundaries_20260820)"}
+    tables = {
+        f"fields_gw_subsidy_{SUFFIX}": ("fields_gw_subsidy.csv", True,
+            "One row per field: water-right source, crop, soil, Tan et al. parameters, field DTW (new and Ma et al.), "
+            "f and GW-ET subsidy (acre-ft/yr, 1985-2025 mean over irrigated field-years) for 4 models x 2 DTW maps, "
+            "distance to the DTW training wells. F_NEW_TAN/S_NEW_TAN are the run's values."),
+        f"field_year_gw_subsidy_{SUFFIX}": ("field_year_gw_subsidy.csv", False,
+            "One row per field-year: IRR (IrrMapper > 50%), ETa and GW-ET subsidy (acre-ft) for 4 models x 2 DTW maps."),
+        f"ha_gw_subsidy_{SUFFIX}": ("ha_gw_subsidy.csv", True,
+            "One row per hydrographic area (NWI_Investigations polygons): totals over irrigated field-years; "
+            "S_MA_TAN_RPT = docs/tables/ha_gw_subsidy_new_vs_ma.csv."),
+        f"ha_year_gw_subsidy_{SUFFIX}": ("ha_year_gw_subsidy.csv", False,
+            "One row per HA-year: ETa and GW-ET subsidy (acre-ft) over irrigated field-years."),
+        "wells_handily_train_nv": ("wells_train.csv", True,
+            "Wells the handily NV parity DTW was trained on (gs://ucrc-wtd/handily/nv/handily_wells_train_nv_parity.csv, "
+            "2026-10-21), with the 100 m DTW maps sampled at each well."),
+        "wells_gwx_nv": ("wells_gwx_nv.csv", True,
+            "gwx Nevada wells with a depth to water (gwx_nevada_wells.zip, product 2026-10-08, MD5 "
+            "e06c9fe9ea211b438bf2722c523ea459); is_train = at a training-well location."),
+    }
+    image = ("dtw_100m_epsg5070", {
+        "dtw_new_m": rdir / "dtw_new_100m_epsg5070.tif",
+        "dtw_sigma_m": rdir / "dtw_sigma_100m_epsg5070.tif",
+        "dtw_ma_m": rdir / "dtw_ma_100m_epsg5070.tif"})
+
+    todo = set(args.only) if args.only else set(tables) | {image[0]}
+    tasks = {}
+    for name, (fname, has_geom, desc) in tables.items():
+        if name not in todo:
+            continue
+        asset = f"{root}/{name}"
+        if _exists(ee, asset):
+            if not args.overwrite:
+                print(f"[ee] {asset} exists; skipped (use --overwrite)")
+                continue
+            ee.data.deleteAsset(asset)
+        blob = gcs.blob(f"{prefix}/{fname}")
+        blob.upload_from_filename(str(app / fname), timeout=1800)
+        src = {"uris": [f"gs://{args.bucket}/{prefix}/{fname}"], "charset": "UTF-8"}
+        if has_geom:
+            src.update({"primaryGeometryColumn": "geometry", "crs": "EPSG:4326", "geodesic": False,
+                        "maxErrorMeters": 0.1})
+        manifest = {"name": asset, "sources": [src], "columnDataTypeOverrides": column_types(app / fname),
+                    "properties": dict(common, description=desc, source_file=fname)}
+        op = ee.data.startTableIngestion(ee.data.newTaskId()[0], manifest)
+        tasks[name] = op["name"]          # poll the operation, not the request ID
+        print(f"[ee] table ingestion started: {name} ({op['name']})", flush=True)
+
+    if image[0] in todo:
+        asset = f"{root}/{image[0]}"
+        if _exists(ee, asset) and args.overwrite:
+            ee.data.deleteAsset(asset)
+        if not _exists(ee, asset):
+            tilesets, bands = [], []
+            for band, path in image[1].items():
+                gcs.blob(f"{prefix}/{path.name}").upload_from_filename(str(path), timeout=3600)
+                tilesets.append({"id": band, "crs": "EPSG:5070",
+                                 "sources": [{"uris": [f"gs://{args.bucket}/{prefix}/{path.name}"]}]})
+                bands.append({"id": band, "tilesetId": band, "tilesetBandIndex": 0, "pyramidingPolicy": "MEAN",
+                              "missingData": {"values": [-9999]}})
+            manifest = {"name": asset, "tilesets": tilesets, "bands": bands, "properties": dict(
+                common,
+                dtw_new_m="handily NV parity DTW, statewide 100 m (nv_dtw_parity_statewide_100m.tif, build 2026-10-08, "
+                          "zip MD5 20af7ee2027ac234774f5a026ee9b4d8), tagged EPSG:5070 (no resampling)",
+                dtw_sigma_m="nv_sigma_parity_statewide_100m.tif, same build",
+                dtw_ma_m=f"Ma et al. (2026) wtd_nevada.tif warped to the same 100 m grid ({summary['ma_candidate']})")}
+            op = ee.data.startIngestion(ee.data.newTaskId()[0], manifest)
+            tasks[image[0]] = op["name"]
+            print(f"[ee] image ingestion started: {image[0]} ({op['name']})", flush=True)
+
+    # wait for the ingestion operations (at most two hours)
+    pending, t0 = dict(tasks), time.time()
+    while pending and time.time() - t0 < 7200:
+        time.sleep(20)
+        for name, op_name in list(pending.items()):
+            op = ee.data.getOperation(op_name)
+            state = op.get("metadata", {}).get("state")
+            if state in ("SUCCEEDED", "FAILED", "CANCELLED"):
+                print(f"[ee] {name}: {state} {op.get('error', {}).get('message', '')}", flush=True)
+                pending.pop(name)
+    print("[ee] done" if not pending else f"[ee] still running after 2 h: {sorted(pending)}")
+
+
+def _exists(ee, asset):
+    try:
+        ee.data.getAsset(asset)
+        return True
+    except ee.EEException:
+        return False
+
+
+if __name__ == "__main__":
+    main()
