@@ -1,1026 +1,910 @@
 // =============================================================================
-// NWI Groundwater ET Explorer
-// Single-file GEE JS app for the Nevada Water Initiative (NWI) presentation.
-// Paste into https://code.earthengine.google.com and run.
+// NWI Groundwater-ET Subsidy Explorer: assessment of the NWI T1 run
+// Single-file Earth Engine app. Paste into https://code.earthengine.google.com and Run.
+// For internal checking of the field-level groundwater-ET (GW-ET) subsidy in the NWI T1 run
+// (nwi_t1_final_20261018) against the Ma et al. (2026) depth-to-groundwater (DTW) map, with
+// attention to fields far from the wells the new DTW map was trained on and fields whose subsidy
+// changed most.
 //
-// Estimates the shallow-groundwater subsidy to crop ET, f(d) x ETa, on Nevada
-// irrigated fields. Four f(d) models are selectable (Tan et al. 2025 is the
-// default and headline); all derive their (d_dec, d_ext, p) from per-pixel soil
-// texture (POLARIS) and rooting depth (CDL), matching the project pipeline.
+// Subsidy, per field and month: min(f x ETa, max(ETa - effective precipitation, 0)), where f is the
+// fraction of ETa groundwater can supply (Tan et al. 2025 in the run). Values are 1985-2025 annual
+// means over irrigated field-years (IrrMapper > 50% of the field), acre-ft/yr, as in the report.
+//
+//   * Tan et al. with the new DTW: the run's values (gw_frac and GW_subsidy_acre_ft in the run's
+//     field files). They reproduce README.md and docs/tables/ha_gw_subsidy_new_vs_ma.csv exactly.
+//   * Banta, Averianov, Shah, and every model with Ma et al.: recomputed with the run's code
+//     (scripts/gw_subsidy) on the same 2026-08-20 fields; see gee/README.md for how close they are.
+//
+// Tables and rasters are built by gee/prep/ (01-07) and checked by gee/prep/08_check_assets.py.
+// This file was first copied unchanged from
+// DRI-NWI/nwi-gw-subsidy (gee/nwi_gw_et_explorer_app.js, commit 7262f69) and then rewritten.
 // =============================================================================
 
 // === CONFIG ===================================================================
 
-var ASSET_FIELDS    = 'projects/ee-prevelle/assets/NWI/Nevada_agricultural_field_boundaries_20260506';
-var ASSET_GW_BASINS = 'projects/ee-prevelle/assets/NV/NWI_Investigations';
-var ASSET_WTD       = 'projects/nmose-openet/assets/WTD-US'; // Ma et al. (2026), per-state
-var ID_OPENET       = 'OpenET/ENSEMBLE/CONUS/GRIDMET/MONTHLY/v2_0'; // 1999-2024
-var ID_OPENET_V21   = 'projects/openet/assets/ensemble/conus/gridmet/monthly/v2_1'; // 2013-2026; used for 2025+
-var ID_IRR          = 'UMT/Climate/IrrMapper_RF/v1_2';
-var ID_CDL          = 'USDA/NASS/CDL';
-var POLARIS_BASE    = 'projects/sat-io/open-datasets/polaris';
-
-var YEAR_MIN = 2000;
+var ROOT = 'projects/nwi-usgs/assets/nwi_gw_subsidy/';
+var RUN_ID = 'nwi_t1_final_20261018';
+var ASSET = {
+  fields:     ROOT + 'fields_gw_subsidy_20261018',      // 29,338 fields of the 2026-08-20 layer
+  fieldYears: ROOT + 'field_year_gw_subsidy_20261018',  // one row per field-year
+  has:        ROOT + 'ha_gw_subsidy_20261018',          // hydrographic areas with totals
+  haYears:    ROOT + 'ha_year_gw_subsidy_20261018',     // one row per HA-year
+  wellsTrain: ROOT + 'wells_handily_train_nv',          // wells the new DTW map was trained on
+  wellsAll:   ROOT + 'wells_gwx_nv',                    // all gwx wells with a depth to water
+  dtw:        ROOT + 'dtw_100m_epsg5070'                // bands dtw_new_m, dtw_sigma_m, dtw_ma_m
+};
+var YEAR_MIN = 1985;
 var YEAR_MAX = 2025;
-// OpenET v2.0 has no 2025 data; switch to the v2.1 ensemble for this year onward.
-var OPENET_V21_MIN_YEAR = 2025;
 
-// Contiguous month ranges [startMonth, endMonth] for each aggregation.
-var AGG_MONTHS = {
-  'Summer (JJA)':            [6, 8],
-  'Growing Season (Apr-Oct)': [4, 10],
-  'Annual':                  [1, 12]
+// Report values the checks panel compares against (README.md, docs/GW_SUBSIDY.md, Fig. 11).
+var REPORT = {
+  subsidyAll: 34733, etaAll: 1423458, nCovered: 16225, coveredNew: 24184, coveredMa: 18563,
+  medianDtwNew: 7.2, medianDtwMa: 7.4
 };
 
-var AGG_DEFAULT      = 'Annual';
-var YEAR_DEFAULT     = 2025;
-var DEXT_MULT_DEFAULT = 1.0;  // multiplier on the texture-derived d_ext (sensitivity)
-var OPACITY_DEFAULT  = 0.6;   // raster layers (WTD / OpenET / IrrMapper) over satellite
-
-// f(d) models. label -> key; first is the default (Tan, the headline model).
+// f(d) models. Tan is the run's model and the default.
 var MODELS = [
-  {label: 'Tan et al. (2025)',    key: 'tan'},
-  {label: 'Banta (2000) linear',  key: 'banta'},
-  {label: 'Averianov (1956)',     key: 'averianov'},
-  {label: 'Shah et al. (2007)',   key: 'shah'}
+  {key: 'TAN',   label: 'Tan et al. (2025): used in the run'},
+  {key: 'BANTA', label: 'Banta (2000) linear'},
+  {key: 'AVER',  label: 'Averianov (1956), p = 3'},
+  {key: 'SHAH',  label: 'Shah et al. (2007)'}
 ];
-var MODEL_DEFAULT_LABEL = MODELS[0].label;
-var MODEL_LABEL_BY_KEY  = {};
-var MODEL_KEY_BY_LABEL  = {};
-MODELS.forEach(function (m) { MODEL_LABEL_BY_KEY[m.key] = m.label; MODEL_KEY_BY_LABEL[m.label] = m.key; });
+var MODEL_LABEL = {};
+var MODEL_KEY = {};
+MODELS.forEach(function (m) { MODEL_LABEL[m.key] = m.label; MODEL_KEY[m.label] = m.key; });
+var AVERIANOV_P = 3.0;  // scripts/gw_subsidy/config.py
+var SHAH_EPS = 0.02;
 
-// Model constants (match src/gw_subsidy/config.py / models.py).
-var AVERIANOV_P = 3.0;   // Averianov power-law exponent
-var SHAH_EPS    = 0.02;  // ET ratio anchoring the Shah exponential decay rate
+// --- Class breaks and palettes ------------------------------------------------
+var PAL_SEQ  = ['f0f0f0', 'edf8b1', 'c7e9b4', '7fcdbb', '41b6c4', '1d91c0', '225ea8', '0c2c84'];
+var PAL_DIV  = ['7f3b08', 'b35806', 'e08214', 'fdb863', 'fee0b6', 'fff3e0', 'f0f0f0',
+                'efedf5', 'd8daeb', 'b2abd2', '8073ac', '542788', '2d004b'];   // orange: new < Ma
+var PAL_DTW  = ['08306b', '08519c', '2171b5', '4292c6', '6baed6', '9ecae1', 'c6dbef', 'f7fbff'];
+var PAL_DDTW = ['053061', '2166ac', '4393c3', '92c5de', 'd1e5f0', 'f7f7f7', 'fddbc7', 'f4a582',
+                'd6604d', 'b2182b', '67001f'];                                    // red: new deeper
+var PAL_SIG  = ['fcfdbf', 'fec287', 'fc8961', 'e75263', 'b5367a', '812581', '4a1079'];
+var PAL_DIST = ['1a9850', '91cf60', 'd9ef8b', 'fee08b', 'fc8d59', 'd73027'];
+var PAL_F    = ['f0f0f0', 'ffffcc', 'c7e9b4', '7fcdbb', '41b6c4', '1d91c0', '225ea8', '0c2c84'];
 
-// Candidate property names holding the basin name on gwBasins features.
-var BASIN_NAME_PROPS = ['BasinName', 'SubAreaNam', 'BasinID', 'Basin', 'NAME', 'Name', 'name'];
+var BRK_SUB  = [0.5, 1, 3, 10, 30, 100, 300];
+var BRK_CHG  = [-300, -100, -30, -10, -3, -0.5, 0.5, 3, 10, 30, 100, 300];
+var BRK_PCT  = [0.5, 1, 2, 5, 10, 20, 40];
+var BRK_PCTD = [-20, -10, -5, -2, -1, -0.25, 0.25, 1, 2, 5, 10, 20];
+var BRK_F    = [0.001, 0.01, 0.05, 0.1, 0.2, 0.4, 0.7];
+var BRK_DTW  = [1, 2, 3, 5, 10, 20, 50];
+var BRK_DDTW = [-15, -5, -2, -1, -0.25, 0.25, 1, 2, 5, 15];
+var BRK_SIG  = [1, 2, 5, 10, 20, 50];
+var BRK_DIST = [1, 2, 5, 10, 20];
+var BRK_HA   = [-3000, -1000, -300, -100, -30, -10, 10, 30, 100, 300, 1000, 3000];
 
-// --- POLARIS root-zone (0-100 cm) thickness weights (cm) ---------------------
-var POLARIS_DEPTHS  = ['0_5', '5_15', '15_30', '30_60', '60_100'];
-var POLARIS_WEIGHTS = [5, 10, 15, 30, 40];
-
-// --- Tan et al. (2025) Table 3 vegetated params (ET0 = 5 mm/d) ----------------
-// Index order = USDA_CLASSES below. Values in cm; converted to m at use.
-var USDA_CLASSES = [
-  'sand', 'loamy sand', 'sandy loam', 'loam', 'silt loam', 'silt',
-  'sandy clay loam', 'clay loam', 'silty clay loam', 'sandy clay', 'silty clay', 'clay'
+// What the fields can be coloured by. `prop(m)` names a stored property; `calc(ft, m)` computes one.
+var FIELD_VARS = [
+  {key: 'chg',    label: 'Subsidy change, new - Ma (acre-ft/yr)', brk: BRK_CHG, pal: PAL_DIV,
+   prop: function (m) { return 'D_' + m; }},
+  {key: 'sNew',   label: 'Subsidy, new DTW (acre-ft/yr)', brk: BRK_SUB, pal: PAL_SEQ,
+   prop: function (m) { return 'S_NEW_' + m; }},
+  {key: 'sMa',    label: 'Subsidy, Ma et al. (acre-ft/yr)', brk: BRK_SUB, pal: PAL_SEQ,
+   prop: function (m) { return 'S_MA_' + m; }},
+  {key: 'pNew',   label: 'Subsidy, new DTW (% of ETa)', brk: BRK_PCT, pal: PAL_SEQ,
+   calc: function (ft, m) { return pct(ft, 'S_NEW_' + m); }},
+  {key: 'pMa',    label: 'Subsidy, Ma et al. (% of ETa)', brk: BRK_PCT, pal: PAL_SEQ,
+   calc: function (ft, m) { return pct(ft, 'S_MA_' + m); }},
+  {key: 'pChg',   label: 'Subsidy change, new - Ma (points of % of ETa)', brk: BRK_PCTD, pal: PAL_DIV,
+   calc: function (ft, m) { return pct(ft, 'D_' + m); }},
+  {key: 'fNew',   label: 'f, new DTW', brk: BRK_F, pal: PAL_F,
+   prop: function (m) { return 'F_NEW_' + m; }},
+  {key: 'fMa',    label: 'f, Ma et al.', brk: BRK_F, pal: PAL_F,
+   prop: function (m) { return 'F_MA_' + m; }},
+  {key: 'dNew',   label: 'Field mean DTW, new (m)', brk: BRK_DTW, pal: PAL_DTW,
+   prop: function () { return 'DTW_NEW_M'; }},
+  {key: 'dMa',    label: 'Field mean DTW, Ma et al. (m)', brk: BRK_DTW, pal: PAL_DTW,
+   prop: function () { return 'DTW_MA_M'; }},
+  {key: 'dChg',   label: 'Field mean DTW change, new - Ma (m)', brk: BRK_DDTW, pal: PAL_DDTW,
+   prop: function () { return 'DTW_D_M'; }},
+  {key: 'sig',    label: 'New DTW uncertainty, field mean sigma (m)', brk: BRK_SIG, pal: PAL_SIG,
+   prop: function () { return 'DTW_SIG_M'; }},
+  {key: 'well',   label: 'Distance to nearest training well (km)', brk: BRK_DIST, pal: PAL_DIST,
+   prop: function () { return 'WT_DIST_KM'; }},
+  {key: 'vsTan',  label: 'Model - Tan recomputed, new DTW (for Tan: run - recomputed) (acre-ft/yr)', brk: BRK_CHG, pal: PAL_DIV,
+   calc: function (ft, m) {
+     return ee.Number(ft.get('S_NEW_' + m)).subtract(ee.Number(ft.get('S_NEW_TANR')));
+   }}
 ];
-var CLASS_IDX = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-// Rooting depth 100 cm (shallow) and 200 cm (deep).
-var P_100    = [7.06, 10.08, 7.34, 6.47, 10.05, 8.84, 9.46, 11.08, 14.46, 18.70, 19.03, 18.99];
-var DDEC_100 = [29.3, 33.0, 44.9, 60.8, 67.6, 61.5, 42.8, 51.1, 38.5, 28.5, 14.1, 48.1];
-var DEXT_100 = [183.4, 212.4, 295.3, 273.5, 650.0, 600.0, 360.2, 600.0, 600.0, 362.2, 585.0, 1094.7];
-var P_200    = [6.51, 8.52, 7.30, 5.82, 7.56, 6.94, 8.94, 9.03, 13.49, 17.93, 13.06, 17.21];
-var DDEC_200 = [29.5, 36.4, 50.5, 65.2, 72.9, 72.0, 43.5, 55.4, 40.0, 31.6, 14.2, 55.1];
-var DEXT_200 = [285.6, 311.2, 388.3, 464.1, 709.2, 681.0, 482.0, 674.0, 712.0, 484.7, 730.0, 1500.0];
+var FIELD_VAR = {};
+FIELD_VARS.forEach(function (v) { FIELD_VAR[v.label] = v; });
 
-// CDL codes treated as deep-rooted (alfalfa, shrub, wetlands, riparian, grapes, orchards)
-// -> 200 cm rooting depth row; everything else uses the 100 cm row.
-var CDL_DEEP_ROOT = [36, 152, 190, 195, 141, 142, 143, 69, 211, 204, 223, 75, 76, 77];
-var CDL_ROOT_YEAR = 2020; // fixed CDL year as a proxy for the field CROP_major mode
-
-// Palettes.
-var NV_BLUE       = '#1f4e79';
-var PALETTE_ET    = ['#440154', '#3b528b', '#21918c', '#5ec962', '#fde725']; // viridis
-var PALETTE_GWET  = ['#f7fcf5', '#c7e9c0', '#74c476', '#31a354', '#006d2c']; // light -> dark green (distinct from blue WTD)
-
-// Discrete WTD classes. Edges are upper bounds; last class is open-ended.
-var WTD_CLASSES = [
-  {label: 'Very shallow (<2 m / <6.6 ft)',        edge: 2,  color: '#08306b'},
-  {label: 'Shallow (2-5 m / 6.6-16.4 ft)',        edge: 5,  color: '#2171b5'},
-  {label: 'Moderate (5-10 m / 16.4-32.8 ft)',     edge: 10, color: '#6baed6'},
-  {label: 'Deep (>=10 m / >=32.8 ft)',            edge: null, color: '#c6dbef'}
-];
-var PALETTE_WTD_CLASS = WTD_CLASSES.map(function (c) { return c.color; });
-
-var ET_MAX_MM     = 1200;
-var GWET_MAX_MM   = 500;
-
-// Coarser reduction scale for area/volume totals (basins, histograms).
-var REDUCE_SCALE  = 500;
-
-// Unit conversions.
-var M2_PER_ACRE   = 4046.86;
-var M3_PER_ACFT   = 1233.48;
-var MM_PER_INCH   = 25.4;
-
-// WTD NoData fill (IEEE float max) — mask it and non-positive depths.
-var WTD_NODATA_MIN = 1e30;
-
-// === DATA LOADERS =============================================================
-
-var fields     = ee.FeatureCollection(ASSET_FIELDS);
-var gwBasins   = ee.FeatureCollection(ASSET_GW_BASINS);
-var nvBounds   = gwBasins.geometry().bounds();
-var wtdNV      = ee.ImageCollection(ASSET_WTD).filter(ee.Filter.eq('state', 'NV')).first();
-wtdNV = wtdNV.updateMask(wtdNV.gt(0).and(wtdNV.lt(WTD_NODATA_MIN)));
-
-// --- POLARIS soil texture -> USDA class -> Tan params (static per-pixel) ------
-
-function polarisRootZoneMean(prop) {
-  var ic = ee.ImageCollection(POLARIS_BASE + '/' + prop + '_mean');
-  var total = 0;
-  POLARIS_WEIGHTS.forEach(function (w) { total += w; });
-  var weighted = POLARIS_DEPTHS.map(function (d, i) {
-    return ic.filter(ee.Filter.eq('system:index', prop + '_' + d)).first()
-             .select('b1').multiply(POLARIS_WEIGHTS[i]);
-  });
-  return ee.ImageCollection(weighted).sum().divide(total).rename(prop);
+function pct(ft, prop) {
+  var eta = ee.Number(ft.get('ETA_AF'));
+  return ee.Number(ft.get(prop)).multiply(100).divide(eta.max(1e-9));
 }
 
-// Root-zone sand/silt/clay (% by mass), renormalized to sum to 100.
-var sandRaw = polarisRootZoneMean('sand');
-var siltRaw = polarisRootZoneMean('silt');
-var clayRaw = polarisRootZoneMean('clay');
-var soilTot = sandRaw.add(siltRaw).add(clayRaw).max(1e-6);
-var sand = sandRaw.divide(soilTot).multiply(100);
-var silt = siltRaw.divide(soilTot).multiply(100);
-var clay = clayRaw.divide(soilTot).multiply(100);
+var M2_PER_ACRE = 4046.86;
+var NV_BLUE = '#1f4e79';
+var HIGHLIGHT = 'ff00ff';
+var OUTLINE_MIN_ZOOM = 11;   // field outlines
+var ALL_WELLS_MIN_ZOOM = 9;  // 137k gwx wells
 
-// USDA texture class index (0-11), replicating soil_texture.usda_texture_class.
-// Build per-class boolean masks, then assign in REVERSE priority so the first
-// matching rule (sand) wins. Default = loam (index 3).
-var sc  = silt.add(clay.multiply(1.5));   // silt + 1.5*clay
-var s2c = silt.add(clay.multiply(2.0));   // silt + 2*clay
-var rules = [
-  /* 0 sand            */ sc.lt(15),
-  /* 1 loamy sand      */ sc.gte(15).and(s2c.lt(30)),
-  /* 2 sandy loam      */ clay.gte(7).and(clay.lt(20)).and(sand.gt(52)).and(s2c.gte(30))
-                            .or(clay.lt(7).and(silt.lt(50)).and(s2c.gte(30))),
-  /* 3 loam            */ clay.gte(7).and(clay.lt(27)).and(silt.gte(28)).and(silt.lt(50)).and(sand.lte(52)),
-  /* 4 silt loam       */ silt.gte(50).and(clay.gte(12)).and(clay.lt(27))
-                            .or(silt.gte(50).and(silt.lt(80)).and(clay.lt(12))),
-  /* 5 silt            */ silt.gte(80).and(clay.lt(12)),
-  /* 6 sandy clay loam */ clay.gte(20).and(clay.lt(35)).and(silt.lt(28)).and(sand.gt(45)),
-  /* 7 clay loam       */ clay.gte(27).and(clay.lt(40)).and(sand.gt(20)).and(sand.lte(45)),
-  /* 8 silty clay loam */ clay.gte(27).and(clay.lt(40)).and(sand.lte(20)),
-  /* 9 sandy clay      */ clay.gte(35).and(sand.gt(45)),
-  /* 10 silty clay     */ clay.gte(40).and(silt.gte(40)),
-  /* 11 clay           */ clay.gte(40).and(sand.lte(45)).and(silt.lt(40))
-];
-var classImg = ee.Image(3); // loam fallback
-for (var ri = rules.length - 1; ri >= 0; ri--) {
-  classImg = classImg.where(rules[ri], ri);
-}
-classImg = classImg.updateMask(sandRaw.mask()).toInt();
+// === DATA =====================================================================
 
-// Deep-root mask from a representative CDL year (proxy for CROP_major mode).
-var cdl = ee.ImageCollection(ID_CDL)
-  .filter(ee.Filter.calendarRange(CDL_ROOT_YEAR, CDL_ROOT_YEAR, 'year'))
-  .first().select('cropland');
-var deepRoot = cdl.remap(CDL_DEEP_ROOT, ee.List.repeat(1, CDL_DEEP_ROOT.length), 0).gt(0);
+var fieldsAll  = ee.FeatureCollection(ASSET.fields);
+var fieldYears = ee.FeatureCollection(ASSET.fieldYears);
+var has        = ee.FeatureCollection(ASSET.has);
+var haYears    = ee.FeatureCollection(ASSET.haYears);
+var wellsTrain = ee.FeatureCollection(ASSET.wellsTrain);
+var wellsAll   = ee.FeatureCollection(ASSET.wellsAll);
+var dtw        = ee.Image(ASSET.dtw);
 
-// Per-pixel Tan params: pick the 100 cm or 200 cm row per pixel via deepRoot.
-function pickParam(vals100, vals200) {
-  var img100 = classImg.remap(CLASS_IDX, vals100);
-  var img200 = classImg.remap(CLASS_IDX, vals200);
-  return img100.where(deepRoot, img200);
-}
-var dDec = pickParam(DDEC_100, DDEC_200).divide(100); // cm -> m
-var dExt0 = pickParam(DEXT_100, DEXT_200).divide(100); // cm -> m (texture d_ext, pre-multiplier)
-var pExp  = pickParam(P_100, P_200);
-
-// === GW-ET FRACTION f(d) ======================================================
-
-// f(d) for the selected model, per pixel. d = WTD (m); dDec/pExp from texture;
-// dExt = texture d_ext scaled by the sensitivity multiplier. All four models are
-// the Tan et al. (2025) Eq. 5 family (see src/gw_subsidy/models.py).
-function gwFracImage(model, dExtMult) {
-  var d    = wtdNV;
-  var dExt = dExt0.multiply(dExtMult);
-
-  if (model === 'banta') {
-    // d_dec = 0, p = 1 (MODFLOW EVT/ETS linear).
-    return ee.Image(1).subtract(d.divide(dExt)).clamp(0, 1);
-  }
-  if (model === 'averianov') {
-    // d_dec = 0, power-law exponent AVERIANOV_P.
-    return ee.Image(1).subtract(d.divide(dExt)).clamp(0, 1).pow(AVERIANOV_P);
-  }
-
+// === GW-ET FRACTION f(d), per pixel (display layer) =============================
+// Same formulas as scripts/gw_subsidy/models.py. Field values are not computed here: they are
+// coverage-weighted means of f over each field's 100 m pixels, computed offline.
+function fImage(model, d, dDec, dExt, p) {
+  if (model === 'BANTA') return ee.Image(1).subtract(d.divide(dExt)).clamp(0, 1);
+  if (model === 'AVER') return ee.Image(1).subtract(d.divide(dExt)).clamp(0, 1).pow(AVERIANOV_P);
   var span = dExt.subtract(dDec);
-  if (model === 'shah') {
-    // Plateau to d_dec, then exponential decay; k anchored so f = eps at d_ext.
-    var k = ee.Image(Math.log(1 / SHAH_EPS)).divide(span); // -ln(eps)/span
+  if (model === 'SHAH') {
+    var k = ee.Image(Math.log(1 / SHAH_EPS)).divide(span);
     var fs = d.subtract(dDec).max(0).multiply(k).multiply(-1).exp();
     fs = fs.where(d.lte(dDec), 1);
-    fs = fs.where(span.lte(0), d.lte(dDec));
-    return fs.clamp(0, 1);
+    return fs.where(span.lte(0), d.lte(dDec)).clamp(0, 1);
   }
-
-  // Tan (default): unified piecewise f(d).
-  var base = dExt.subtract(d).divide(span).clamp(0, 1);
-  var ft = base.pow(pExp);
-  ft = ft.where(d.lte(dDec), 1);
-  ft = ft.where(d.gte(dExt), 0);
-  ft = ft.where(span.lte(0), d.lte(dDec)); // degenerate soil params guard
-  return ft.clamp(0, 1);
+  var ft = dExt.subtract(d).divide(span).clamp(0, 1).pow(p);
+  ft = ft.where(d.lte(dDec), 1).where(d.gte(dExt), 0);
+  return ft.where(span.lte(0), d.lte(dDec)).clamp(0, 1);
 }
 
-// Server-side basin-name lookup: try each candidate property in order.
-function resolveBasinName(feature) {
-  var f = ee.Feature(feature);
-  var name = ee.String('');
-  for (var i = 0; i < BASIN_NAME_PROPS.length; i++) {
-    name = ee.String(ee.Algorithms.If(
-      name.length().gt(0), name,
-      ee.Algorithms.If(f.get(BASIN_NAME_PROPS[i]),
-        ee.String(f.get(BASIN_NAME_PROPS[i])),
-        ee.String(''))
-    ));
-  }
-  return ee.String(ee.Algorithms.If(
-    name.length().gt(0), name, f.get('system:index')
-  ));
+function fPixelLayer(model, which) {
+  var sfx = which === 'ma' ? '_MA' : '';
+  var withParams = fieldsAll.filter(ee.Filter.notNull(['DDEC' + sfx + '_M', 'DEXT' + sfx + '_M', 'P' + sfx]));
+  var dDec = ee.Image().float().paint(withParams, 'DDEC' + sfx + '_M');
+  var dExt = ee.Image().float().paint(withParams, 'DEXT' + sfx + '_M');
+  var p    = ee.Image().float().paint(withParams, 'P' + sfx);
+  var d    = dtw.select(which === 'ma' ? 'dtw_ma_m' : 'dtw_new_m');
+  return fImage(model, d, dDec, dExt, p).updateMask(dDec.mask());
 }
 
-function dateRangeForYear(year) {
-  var start = ee.Date.fromYMD(year, 1, 1);
-  var end   = ee.Date.fromYMD(year, 12, 31).advance(1, 'day');
-  return [start, end];
+// === HELPERS ====================================================================
+
+function classify(img, brk) {
+  var c = ee.Image(0);
+  for (var i = 0; i < brk.length; i++) c = c.where(img.gte(brk[i]), i + 1);
+  return c.updateMask(img.mask()).toByte();
 }
 
-// OpenET ensemble collection for a year: v2.1 for 2025+ (v2.0 stops at 2024),
-// v2.0 otherwise. Both expose the same 'et_ensemble_mad' band.
-function openetCollection(year) {
-  return ee.ImageCollection(year >= OPENET_V21_MIN_YEAR ? ID_OPENET_V21 : ID_OPENET);
+function classLabels(brk) {
+  var out = ['< ' + brk[0]];
+  for (var i = 1; i < brk.length; i++) out.push(brk[i - 1] + ' to ' + brk[i]);
+  out.push('>= ' + brk[brk.length - 1]);
+  return out;
 }
 
-function etForYear(year, aggKey) {
-  var m  = AGG_MONTHS[aggKey];
-  var dr = dateRangeForYear(year);
-  return openetCollection(year)
-    .filterBounds(nvBounds)
-    .filterDate(dr[0], dr[1])
-    .filter(ee.Filter.calendarRange(m[0], m[1], 'month'))
-    .select('et_ensemble_mad')
-    .sum();
+function fmt(x, dec) {
+  if (x === null || x === undefined || isNaN(x)) return '-';
+  var s = Number(x).toFixed(dec === undefined ? 0 : dec);
+  var parts = s.split('.');
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return parts.join('.');
 }
 
-// Classify WTD into discrete classes using WTD_CLASSES edges (map display only).
-function classifyWtd(wtdImg) {
-  var b = wtdImg.select(0);
-  var classified = ee.Image(WTD_CLASSES.length - 1);
-  for (var i = WTD_CLASSES.length - 2; i >= 0; i--) {
-    classified = classified.where(b.lt(WTD_CLASSES[i].edge), i);
-  }
-  return classified.updateMask(b.mask()).toInt();
-}
-var wtdClassified = classifyWtd(wtdNV);
-
-function irrMaskForYear(year) {
-  var dr = dateRangeForYear(year);
-  return ee.ImageCollection(ID_IRR)
-    .filterBounds(nvBounds)
-    .filterDate(dr[0], dr[1])
-    .mosaic()
-    .eq(0); // class 0 = irrigated
+function haTitle(name, code) {
+  var n = name ? String(name).replace(/([a-z])([A-Z])/g, '$1 $2') : '?';
+  return n + ' (' + code + ')';
 }
 
-// Rasterize the field polygons once, to keep fills inside tracked fields.
-var fieldsMask = ee.Image().byte().paint(fields, 1).gt(0);
+var SRC_TEXT = {1: 'Groundwater', 2: 'Surface water', 3: 'Mixed (GW + SW)'};
 
-// === CORE COMPUTATIONS (per-pixel) ============================================
-
-function gwComponentsForYear(year, aggKey, model, dExtMult) {
-  var et     = etForYear(year, aggKey);
-  var irr    = irrMaskForYear(year);
-  var gwFrac = gwFracImage(model, dExtMult);
-  var gwEt   = et.multiply(gwFrac);
-  return {
-    et:      et,
-    gwFrac:  gwFrac,
-    gwEt:    gwEt,
-    irr:     irr,
-    etIrr:   et.updateMask(irr),
-    gwEtIrr: gwEt.updateMask(irr)
-  };
-}
-
-function yearSummaryForGeom(year, aggKey, model, dExtMult, geom, scale) {
-  var c  = gwComponentsForYear(year, aggKey, model, dExtMult);
-  var px = ee.Image.pixelArea();
-  var stack = c.etIrr.multiply(px).rename('et_vol_mm_m2')
-    .addBands(c.gwEtIrr.multiply(px).rename('gwEt_vol_mm_m2'))
-    .addBands(c.irr.multiply(px).rename('irr_area_m2'));
-  var sums = stack.reduceRegion({
-    reducer:   ee.Reducer.sum(),
-    geometry:  geom,
-    scale:     scale,
-    maxPixels: 1e10,
-    tileScale: 4
-  });
-  var meansOverIrr = wtdNV.rename('wtd_m')
-    .addBands(c.gwFrac.rename('gwFrac'))
-    .updateMask(c.irr)
-    .reduceRegion({
-      reducer:   ee.Reducer.mean(),
-      geometry:  geom,
-      scale:     scale,
-      maxPixels: 1e10,
-      tileScale: 4
-    });
-  var num = function (raw) { return ee.Number(ee.Algorithms.If(raw, raw, 0)); };
-  var mmM2ToAcft = 1 / (1000 * M3_PER_ACFT);
-  var etAcft   = num(sums.get('et_vol_mm_m2')).multiply(mmM2ToAcft);
-  var gwEtAcft = num(sums.get('gwEt_vol_mm_m2')).multiply(mmM2ToAcft);
-  var irrM2    = num(sums.get('irr_area_m2'));
-  var denom    = irrM2.max(1);
-  var acftToMm = M3_PER_ACFT * 1000;
-  return ee.Feature(null, {
-    year:        year,
-    et_mm:       etAcft.multiply(acftToMm).divide(denom),
-    gwEt_mm:     gwEtAcft.multiply(acftToMm).divide(denom),
-    et_acft:     etAcft,
-    gwEt_acft:   gwEtAcft,
-    non_gw_acft: etAcft.subtract(gwEtAcft),
-    irr_area_m2: irrM2,
-    irr_acres:   irrM2.divide(M2_PER_ACRE),
-    wtd_m:       meansOverIrr.get('wtd_m'),
-    gwFrac:      meansOverIrr.get('gwFrac')
-  });
-}
-
-// Monthly FC for a geometry: one Feature per calendar month of `year`. The f(d)
-// fraction image is passed in (already model/multiplier-resolved).
-function monthlySeriesForGeom(year, gwFracImg, geom, scale) {
-  var irr = irrMaskForYear(year);
-  var px  = ee.Image.pixelArea();
-  var mmM2ToAcft = 1 / (1000 * M3_PER_ACFT);
-  var num = function (raw) { return ee.Number(ee.Algorithms.If(raw, raw, 0)); };
-
-  var months = ee.List.sequence(1, 12);
-  return ee.FeatureCollection(months.map(function (m) {
-    m = ee.Number(m);
-    var start = ee.Date.fromYMD(year, m, 1);
-    var end   = start.advance(1, 'month');
-    var img = openetCollection(year).filterDate(start, end)
-      .select('et_ensemble_mad').sum();
-    var etMm   = img.updateMask(irr);
-    var gwEtMm = img.multiply(gwFracImg).updateMask(irr);
-    var meanEt = etMm.reduceRegion({
-      reducer: ee.Reducer.mean(), geometry: geom, scale: scale, tileScale: 4, maxPixels: 1e10
-    }).get('et_ensemble_mad');
-    var meanGw = gwEtMm.reduceRegion({
-      reducer: ee.Reducer.mean(), geometry: geom, scale: scale, tileScale: 4, maxPixels: 1e10
-    }).get('et_ensemble_mad');
-    var volEt = etMm.multiply(px).reduceRegion({
-      reducer: ee.Reducer.sum(), geometry: geom, scale: scale, tileScale: 4, maxPixels: 1e10
-    }).get('et_ensemble_mad');
-    var volGw = gwEtMm.multiply(px).reduceRegion({
-      reducer: ee.Reducer.sum(), geometry: geom, scale: scale, tileScale: 4, maxPixels: 1e10
-    }).get('et_ensemble_mad');
-    var etMmNum = num(meanEt);
-    var gwMmNum = num(meanGw);
-    return ee.Feature(null, {
-      month:         m,
-      ET:            etMmNum.divide(MM_PER_INCH),
-      'GW-ET':       gwMmNum.divide(MM_PER_INCH),
-      ET_mm_shadow:  etMmNum,
-      ET_acft:       num(volEt).multiply(mmM2ToAcft),
-      'GW-ET_acft':  num(volGw).multiply(mmM2ToAcft),
-      nonGW_acft:    num(volEt).multiply(mmM2ToAcft).subtract(num(volGw).multiply(mmM2ToAcft))
-    });
-  }));
-}
-
-// === UI STATE =================================================================
+// === STATE ======================================================================
 
 var state = {
-  year:     YEAR_DEFAULT,
-  agg:      AGG_DEFAULT,
-  model:    MODELS[0].key,        // 'tan'
-  dExtMult: DEXT_MULT_DEFAULT,
-  opacity:  OPACITY_DEFAULT,
-  zoom:     6,                    // tracked to zoom-gate field outlines (see paintFieldOutlines)
+  model: 'TAN',
+  fieldVar: FIELD_VARS[0].label,
+  population: 'irrigated',   // 'irrigated' (report population) or 'all'
+  nvOnly: false,
+  maCovered: false,
+  withSubsidy: false,
+  minChange: 0,              // acre-ft/yr, |new - Ma| of the selected model
+  minWellKm: 0,              // km to the nearest training well
+  opacity: 0.75,
+  zoom: 6,
   selected: null,
   layers: {
-    'GW-ET Fields': true,
-    'WTD':               true,
-    'OpenET':            false,
-    'IrrMapper':         false,
-    'NWI Basins':        true
+    'Fields (coloured)': true,
+    'DTW, new (handily 100 m)': false,
+    'DTW, Ma et al. (100 m)': false,
+    'DTW change, new - Ma': false,
+    'DTW uncertainty, new (sigma)': false,
+    'f per 100 m pixel, new DTW': false,
+    'f per 100 m pixel, Ma et al.': false,
+    'Distance to nearest training well': false,
+    'Training wells (new DTW)': true,
+    'All gwx wells with a depth to water': false,
+    'HA change, new - Ma': false,
+    'Hydrographic areas': true
   }
 };
 
-var HIGHLIGHT_LAYER = 'Selected';
-var HIGHLIGHT_COLOR = 'ff00ff';
+function filteredFields() {
+  var fc = fieldsAll;
+  var m = state.model;
+  if (state.population === 'irrigated') fc = fc.filter(ee.Filter.gt('N_IRR_YRS', 0));
+  if (state.nvOnly) fc = fc.filter(ee.Filter.eq('STATE', 'NV'));
+  if (state.maCovered) fc = fc.filter(ee.Filter.eq('MA_COVER', 1));
+  if (state.withSubsidy) {
+    fc = fc.filter(ee.Filter.or(ee.Filter.gt('S_NEW_' + m, 0.5), ee.Filter.gt('S_MA_' + m, 0.5)));
+  }
+  if (state.minChange > 0) {
+    fc = fc.filter(ee.Filter.or(ee.Filter.gte('D_' + m, state.minChange),
+                                ee.Filter.lte('D_' + m, -state.minChange)));
+  }
+  if (state.minWellKm > 0) fc = fc.filter(ee.Filter.gte('WT_DIST_KM', state.minWellKm));
+  return fc;
+}
 
-var suppressToggle = false;
+// The coloured property of each field: a stored property, or one computed into 'v'.
+function fieldValues(fc) {
+  var v = FIELD_VAR[state.fieldVar];
+  var m = state.model;
+  if (v.prop) {
+    var prop = v.prop(m);
+    return {fc: fc.filter(ee.Filter.notNull([prop])), prop: prop};
+  }
+  return {fc: fc.map(function (ft) { return ft.set('v', v.calc(ft, m)); }), prop: 'v'};
+}
 
-// === UI: MAP ==================================================================
+// === UI: MAP ====================================================================
 
 var map = ui.Map();
 map.setOptions('HYBRID');
-map.setCenter(-117, 39, 6);
-map.setControlVisibility({layerList: false, mapTypeControl: false, fullscreenControl: false});
+map.setCenter(-117, 39.3, 6);
+map.setControlVisibility({layerList: false, mapTypeControl: true, fullscreenControl: false});
+map.style().set('cursor', 'crosshair');
 
-var wtdCaveat = ui.Label(
-  'Water table depth: long-term reference snapshot, not year-specific.',
-  {
-    fontSize: '11px', color: 'white',
-    backgroundColor: 'rgba(0,0,0,0.65)', padding: '4px 8px',
-    margin: '0', position: 'bottom-right'
-  }
-);
-map.add(wtdCaveat);
+// === UI: LEFT PANEL =============================================================
 
-// === UI: LEFT PANEL ===========================================================
+var leftPanel = ui.Panel({style: {width: '470px', padding: '8px'}});
+function header(text) {
+  return ui.Label(text, {fontWeight: 'bold', fontSize: '13px', margin: '10px 0 2px 0', color: NV_BLUE});
+}
+function small(text, color) {
+  return ui.Label(text, {fontSize: '11px', color: color || '#555', margin: '0 0 2px 0'});
+}
 
-var leftPanel = ui.Panel({style: {width: '440px', padding: '8px'}});
-
-leftPanel.add(ui.Label('NWI Groundwater ET Explorer', {
-  fontSize: '20px', fontWeight: 'bold', color: 'white',
-  backgroundColor: NV_BLUE, padding: '10px', margin: '0 0 4px 0',
-  textAlign: 'center', stretch: 'horizontal'
+leftPanel.add(ui.Label('NWI GW-ET Subsidy Explorer', {
+  fontSize: '20px', fontWeight: 'bold', color: 'white', backgroundColor: NV_BLUE,
+  padding: '10px', margin: '0 0 4px 0', textAlign: 'center', stretch: 'horizontal'
 }));
-leftPanel.add(ui.Label(
-  'OpenET ensemble x Water-table depth x IrrMapper — estimated shallow-GW subsidy to crop ET on Nevada irrigated fields',
-  {fontSize: '12px', color: '#333', margin: '0 0 8px 0'}
-));
+leftPanel.add(small(
+  'Internal check of the field groundwater-ET subsidy in run ' + RUN_ID + ' (2026-08-20 fields; ' +
+  'handily parity DTW, 100 m) against Ma et al. (2026). Values are 1985-2025 means over irrigated ' +
+  'field-years, acre-ft/yr. Click a field, a well or a hydrographic area (HA).', '#333'));
 
-// Year slider
-var yearLabel  = ui.Label('Year: ' + YEAR_DEFAULT, {fontWeight: 'bold', margin: '6px 0 0 0'});
-var yearSlider = ui.Slider({
-  min: YEAR_MIN, max: YEAR_MAX, value: YEAR_DEFAULT, step: 1,
-  onChange: function (v) { state.year = v; yearLabel.setValue('Year: ' + v); refresh(); },
-  style: {stretch: 'horizontal'}
-});
-leftPanel.add(yearLabel);
-leftPanel.add(yearSlider);
-
-// Aggregation
-leftPanel.add(ui.Label('OpenET aggregation', {fontWeight: 'bold', margin: '6px 0 0 0'}));
-var aggSelect = ui.Select({
-  items: Object.keys(AGG_MONTHS), value: AGG_DEFAULT,
-  onChange: function (v) { state.agg = v; refresh(); },
-  style: {stretch: 'horizontal'}
-});
-leftPanel.add(aggSelect);
-
-// f(d) model selector (Tan default)
-leftPanel.add(ui.Label('GW-ET model f(d)', {fontWeight: 'bold', margin: '6px 0 0 0'}));
+// --- model and colouring
+leftPanel.add(header('Model and map'));
 var modelSelect = ui.Select({
-  items: MODELS.map(function (m) { return m.label; }),
-  value: MODEL_DEFAULT_LABEL,
-  onChange: function (v) { state.model = MODEL_KEY_BY_LABEL[v]; refresh(); },
+  items: MODELS.map(function (m) { return m.label; }), value: MODEL_LABEL.TAN,
+  onChange: function (v) { state.model = MODEL_KEY[v]; refresh(); }, style: {stretch: 'horizontal'}
+});
+leftPanel.add(ui.Panel([ui.Label('f(d) model', {margin: '6px 4px 0 0', fontSize: '12px'}), modelSelect],
+  ui.Panel.Layout.flow('horizontal'), {stretch: 'horizontal'}));
+var varSelect = ui.Select({
+  items: FIELD_VARS.map(function (v) { return v.label; }), value: state.fieldVar,
+  onChange: function (v) { state.fieldVar = v; refresh(); }, style: {stretch: 'horizontal'}
+});
+leftPanel.add(ui.Panel([ui.Label('Colour fields by', {margin: '6px 4px 0 0', fontSize: '12px'}), varSelect],
+  ui.Panel.Layout.flow('horizontal'), {stretch: 'horizontal'}));
+leftPanel.add(small('Tan with the new DTW is the run\'s value; other models and every Ma et al. value ' +
+  'are recomputed with the run\'s code (see Notes).'));
+
+// --- filters
+leftPanel.add(header('Which fields'));
+var popSelect = ui.Select({
+  items: ['Irrigated in at least one year (report)', 'All fields'],
+  value: 'Irrigated in at least one year (report)',
+  onChange: function (v) { state.population = v.indexOf('All') === 0 ? 'all' : 'irrigated'; refresh(); },
   style: {stretch: 'horizontal'}
 });
-leftPanel.add(modelSelect);
-leftPanel.add(ui.Label(
-  'd_dec, d_ext, p are per-pixel from POLARIS soil texture + CDL rooting depth ' +
-  '(Tan Table 3 vegetated, ET0=5). Banta (linear) and Averianov (p=3) set d_dec=0.',
-  {fontSize: '11px', color: '#666', margin: '0 0 0 0'}
-));
+leftPanel.add(popSelect);
+function filterBox(label, key) {
+  return ui.Checkbox({label: label, value: state[key], style: {fontSize: '12px', margin: '1px 0'},
+    onChange: function (v) { state[key] = v; refresh(); }});
+}
+leftPanel.add(filterBox('Nevada fields only', 'nvOnly'));
+leftPanel.add(filterBox('Only fields covered by the Ma et al. map (like-for-like)', 'maCovered'));
+leftPanel.add(filterBox('Only fields with a subsidy > 0.5 acre-ft/yr under either map', 'withSubsidy'));
 
-// d_ext sensitivity multiplier (replaces the fixed-metres extinction-depth slider)
-var dExtLabel  = ui.Label('d_ext sensitivity: ' + DEXT_MULT_DEFAULT.toFixed(2) + ' x texture',
-  {fontWeight: 'bold', margin: '6px 0 0 0'});
-var dExtSlider = ui.Slider({
-  min: 0.5, max: 2.0, value: DEXT_MULT_DEFAULT, step: 0.1,
-  onChange: function (v) {
-    state.dExtMult = v;
-    dExtLabel.setValue('d_ext sensitivity: ' + Number(v).toFixed(2) + ' x texture');
-    refresh();
-  },
-  style: {stretch: 'horizontal'}
-});
-leftPanel.add(dExtLabel);
-leftPanel.add(dExtSlider);
+var chgLabel = ui.Label('', {fontSize: '12px', margin: '6px 0 0 0'});
+var chgSlider = ui.Slider({min: 0, max: 200, value: 0, step: 1, style: {stretch: 'horizontal'},
+  onChange: ui.util.debounce(function (v) { state.minChange = v; setChgLabel(); refresh(); }, 500)});
+function setChgLabel() {
+  chgLabel.setValue('Large changes only: |new - Ma| >= ' + state.minChange + ' acre-ft/yr' +
+    (state.minChange === 0 ? ' (off)' : ''));
+}
+setChgLabel();
+leftPanel.add(chgLabel);
+leftPanel.add(chgSlider);
 
-// Raster opacity slider
-var opacityLabel  = ui.Label('Raster opacity: ' + OPACITY_DEFAULT.toFixed(2),
-  {fontWeight: 'bold', margin: '6px 0 0 0'});
-var opacitySlider = ui.Slider({
-  min: 0.1, max: 1.0, value: OPACITY_DEFAULT, step: 0.05,
-  onChange: function (v) {
-    state.opacity = v;
-    opacityLabel.setValue('Raster opacity: ' + Number(v).toFixed(2));
-    map.layers().forEach(function (layer) {
-      var name = layer.getName();
-      if (name === 'OpenET' || name === 'Water table depth' || name === 'IrrMapper irrigated') {
-        layer.setOpacity(v);
-      }
-    });
-  },
-  style: {stretch: 'horizontal'}
-});
-leftPanel.add(opacityLabel);
-leftPanel.add(opacitySlider);
+var wellLabel = ui.Label('', {fontSize: '12px', margin: '6px 0 0 0'});
+var wellSlider = ui.Slider({min: 0, max: 30, value: 0, step: 0.5, style: {stretch: 'horizontal'},
+  onChange: ui.util.debounce(function (v) { state.minWellKm = v; setWellLabel(); refresh(); }, 500)});
+function setWellLabel() {
+  wellLabel.setValue('No well data: nearest training well >= ' + state.minWellKm + ' km' +
+    (state.minWellKm === 0 ? ' (off)' : ''));
+}
+setWellLabel();
+leftPanel.add(wellLabel);
+leftPanel.add(wellSlider);
 
-// Layer checkboxes
-leftPanel.add(ui.Label('Layers', {fontWeight: 'bold', margin: '8px 0 2px 0'}));
-var toggleWidgets = {};
-var layerNames = [
-  'GW-ET Fields', 'WTD', 'OpenET', 'IrrMapper', 'NWI Basins'
-];
-layerNames.forEach(function (name) {
-  var cb = ui.Checkbox({
-    label: name, value: state.layers[name],
-    onChange: function (v) {
-      if (suppressToggle) return;
-      state.layers[name] = v;
-      if (v && name === 'GW-ET Fields' && state.layers['OpenET']) {
-        suppressToggle = true;
-        toggleWidgets['OpenET'].setValue(false);
-        state.layers['OpenET'] = false;
-        suppressToggle = false;
-      }
-      if (v && name === 'OpenET' && state.layers['GW-ET Fields']) {
-        suppressToggle = true;
-        toggleWidgets['GW-ET Fields'].setValue(false);
-        state.layers['GW-ET Fields'] = false;
-        suppressToggle = false;
-      }
-      refresh();
-    }
-  });
-  toggleWidgets[name] = cb;
+var summaryPanel = ui.Panel({style: {margin: '4px 0 0 0'}});
+leftPanel.add(summaryPanel);
+
+// --- layers
+leftPanel.add(header('Layers'));
+var layerBoxes = {};
+Object.keys(state.layers).forEach(function (name) {
+  var cb = ui.Checkbox({label: name, value: state.layers[name], style: {fontSize: '12px', margin: '1px 0'},
+    onChange: function (v) { state.layers[name] = v; paintLayers(); updateLegend(); }});
+  layerBoxes[name] = cb;
   leftPanel.add(cb);
 });
-
-var statusLabel = ui.Label('', {color: '#666', margin: '6px 0 0 0'});
-leftPanel.add(statusLabel);
-
-var chartsPanel = ui.Panel({style: {margin: '4px 0 0 0'}});
-leftPanel.add(chartsPanel);
+var opacityLabel = ui.Label('Raster opacity: ' + state.opacity, {fontSize: '12px', margin: '6px 0 0 0'});
+leftPanel.add(opacityLabel);
+leftPanel.add(ui.Slider({min: 0.1, max: 1, value: state.opacity, step: 0.05, style: {stretch: 'horizontal'},
+  onChange: function (v) {
+    state.opacity = v;
+    opacityLabel.setValue('Raster opacity: ' + v.toFixed(2));
+    map.layers().forEach(function (l) { if (RASTER_LAYERS.indexOf(l.getName()) >= 0) l.setOpacity(v); });
+  }}));
 
 var legendPanel = ui.Panel({style: {margin: '6px 0 0 0'}});
 leftPanel.add(legendPanel);
 
-// === UI: REFERENCES ===========================================================
+// --- click results
+leftPanel.add(header('Selection'));
+var statusLabel = small('Click the map.');
+leftPanel.add(statusLabel);
+var infoPanel = ui.Panel({style: {margin: '0'}});
+leftPanel.add(infoPanel);
 
-// Models, datasets, and methods cited by the app (mirrors README References).
-// `tag` is a short bold bracketed label identifying what each reference backs.
-var REFERENCES = [
-  {tag: 'Tan model',
-   text: 'Tan, S.-C., Jiang, X.-W., et al. (2025). Revisiting the quantitative relationship ' +
-         'between groundwater evapotranspiration and water table depth: A numerical study. ' +
-         'Journal of Hydrology, 658, 133100.',
-   url: 'https://doi.org/10.1016/j.jhydrol.2025.133100'},
-  {tag: 'Shah model',
-   text: 'Shah, N., Nachabe, M., & Ross, M. (2007). Extinction Depth and Evapotranspiration from ' +
-         'Ground Water under Selected Land Covers. Groundwater, 45(3), 329-338.',
-   url: 'https://doi.org/10.1111/j.1745-6584.2007.00302.x'},
-  {tag: 'Averianov model',
-   text: 'Averianov, S.F. (1956). Seepage from irrigation canals and its influence on regime ' +
-         'of ground water.'},
-  {tag: 'Banta model',
-   text: 'Banta, E. (2000). MODFLOW-2000, the U.S. Geological Survey Modular Ground-Water Model; ' +
-         'documentation of the Evapotranspiration with a Segmented Function (ETS1) and Drains ' +
-         'with Return Flow (DRT1) packages. USGS Open-File Report 2000-466.',
-   url: 'https://doi.org/10.3133/ofr00466'},
-  {tag: 'WTD',
-   text: 'Ma, Y., Condon, L. E., Koch, J., et al. (2026). High resolution US water table depth ' +
-         'estimates reveal quantity of accessible groundwater. Communications Earth & ' +
-         'Environment, 7(1), 45.',
-   url: 'https://doi.org/10.1038/s43247-025-03094-3'},
-  {tag: 'Soil hydraulics',
-   text: 'Carsel, R. F., & Parrish, R. S. (1988). Developing joint probability distributions of ' +
-         'soil water retention characteristics. Water Resources Research, 24(5), 755-769.',
-   url: 'https://doi.org/10.1029/WR024i005p00755'},
-  {tag: 'POLARIS',
-   text: 'Chaney, N. W., Minasny, B., Herman, J. D., et al. (2019). POLARIS Soil Properties: 30-m ' +
-         'Probabilistic Maps of Soil Properties Over the Contiguous United States. Water ' +
-         'Resources Research, 55(4), 2916-2938.',
-   url: 'https://doi.org/10.1029/2018WR022797'},
-  {tag: 'OpenET',
-   text: 'Melton, F., Huntington, J., Grimm, R., et al. (2022). OpenET: Filling a Critical Data ' +
-         'Gap in Water Management for the Western United States. JAWRA.',
-   url: 'https://doi.org/10.1111/1752-1688.12956'},
-  {tag: 'OpenET',
-   text: 'Volk, J. M., Huntington, J. L., Melton, F. S., et al. (2024). Assessing the accuracy ' +
-         'of OpenET satellite-based evapotranspiration data to support water resource and land ' +
-         'management applications. Nature Water, 2(2), 193-205.',
-   url: 'https://doi.org/10.1038/s44221-023-00181-7'},
-  {tag: 'GW pumping',
-   text: 'Ott, T. J., Majumdar, S., Huntington, J. L., et al. (2024). Toward field-scale ' +
-         'groundwater pumping and improved groundwater management using remote sensing and ' +
-         'climate data. Agricultural Water Management, 302, 109000.',
-   url: 'https://doi.org/10.1016/j.agwat.2024.109000'},
-  {tag: 'IrrMapper',
-   text: 'Ketchum, D., Jencso, K., Maneta, M. P., Melton, F., Jones, M. O., & Huntington, J. ' +
-         '(2020). IrrMapper: A Machine Learning Approach for High Resolution Mapping of Irrigated ' +
-         'Agriculture Across the Western U.S. Remote Sensing, 12(14), 2328.',
-   url: 'https://doi.org/10.3390/rs12142328'},
-  {tag: 'IrrMapper',
-   text: 'Ketchum, D., Hoylman, Z. H., Huntington, J., Brinkerhoff, D., & Jencso, K. G. (2023). ' +
-         'Irrigation intensification impacts sustainability of streamflow in the Western United ' +
-         'States. Communications Earth & Environment, 4(1), 479.',
-   url: 'https://doi.org/10.1038/s43247-023-01152-2'},
-  {tag: 'CDL',
-   text: 'Boryan, C., Yang, Z., Mueller, R., & Craig, M. (2011). Monitoring US agriculture: the ' +
-         'USDA, National Agricultural Statistics Service, Cropland Data Layer Program. Geocarto ' +
-         'International, 26(5), 341-358.',
-   url: 'https://doi.org/10.1080/10106049.2011.562309'},
-  {tag: 'GEE',
-   text: 'Gorelick, N., Hancher, M., Dixon, M., Ilyushchenko, S., Thau, D., & Moore, R. (2017). ' +
-         'Google Earth Engine: Planetary-scale geospatial analysis for everyone. Remote Sensing ' +
-         'of Environment, 202, 18-27.',
-   url: 'https://doi.org/10.1016/j.rse.2017.06.031'},
-  {tag: 'GEE community catalog',
-   text: 'Roy, S., Majumdar, S., & Swetnam, T. (2025). samapriya/awesome-gee-community-datasets: ' +
-         'Community Catalog (3.9.0). Zenodo.',
-   url: 'https://doi.org/10.5281/zenodo.17641528'}
-];
+// --- rankings, checks, notes, references (collapsible)
+function collapsible(title, build) {
+  var body = ui.Panel({style: {shown: false, margin: '0 0 0 4px'}});
+  var built = false;
+  var btn = ui.Button({label: '+ ' + title, style: {margin: '6px 0 0 0', stretch: 'horizontal'},
+    onClick: function () {
+      var show = !body.style().get('shown');
+      if (show && !built) { build(body); built = true; }
+      body.style().set('shown', show);
+      btn.setLabel((show ? '- ' : '+ ') + title);
+    }});
+  leftPanel.add(btn);
+  leftPanel.add(body);
+  return {body: body, rebuild: function () { if (built) { body.clear(); build(body); } }};
+}
+var rankSection = collapsible('HAs with the largest change (selected model)', buildRanking);
+var checkSection = collapsible('Checks against the report', buildChecks);
+collapsible('Notes: what the numbers are', buildNotes);
+collapsible('References', buildReferences);
 
-// Collapsible References section: a toggle header that shows/hides the list.
-// Each entry is a horizontal row: a bold [tag] (a DOI hyperlink when one exists)
-// followed by the (wrapping) citation text.
-var refsExpanded = false;
-var refsListPanel = ui.Panel({style: {margin: '2px 0 0 0', shown: false}});
-REFERENCES.forEach(function (r) {
-  // Linked tags are blue to read as hyperlinks; unlinked ones stay plain bold.
-  var tagStyle = {fontSize: '10px', fontWeight: 'bold', margin: '0 4px 0 0',
-                  color: r.url ? NV_BLUE : '#222'};
-  var tagLabel = r.url
-    ? ui.Label('[' + r.tag + ']', tagStyle, r.url)
-    : ui.Label('[' + r.tag + ']', tagStyle);
-  refsListPanel.add(ui.Panel({
-    widgets: [
-      tagLabel,
-      ui.Label(r.text,
-        {fontSize: '10px', color: '#444', margin: '0', stretch: 'horizontal'})
-    ],
-    layout: ui.Panel.Layout.flow('horizontal'),
-    style: {margin: '0 0 5px 0', stretch: 'horizontal'}
-  }));
-});
-
-var refsHeader = ui.Button({
-  label: '▸ References',
-  onClick: function () {
-    refsExpanded = !refsExpanded;
-    refsHeader.setLabel((refsExpanded ? '▾' : '▸') + ' References');
-    refsListPanel.style().set('shown', refsExpanded);
-  },
-  style: {margin: '8px 0 2px 0', color: NV_BLUE, fontWeight: 'bold', stretch: 'horizontal'}
-});
-
-leftPanel.add(refsHeader);
-leftPanel.add(refsListPanel);
-
-// === UI: LAYOUT ===============================================================
+// === LAYOUT =====================================================================
 
 ui.root.clear();
-ui.root.add(ui.SplitPanel({
-  firstPanel:  leftPanel,
-  secondPanel: map,
-  orientation: 'horizontal',
-  wipe:        false,
-  style:       {stretch: 'both'}
-}));
+ui.root.add(ui.SplitPanel({firstPanel: leftPanel, secondPanel: map, orientation: 'horizontal',
+  style: {stretch: 'both'}}));
 
-// === LEGEND HELPERS ===========================================================
+// === MAP LAYERS =================================================================
 
-function gradientLegend(title, palette, minVal, maxVal, unit) {
-  var panel = ui.Panel({style: {margin: '2px 0'}});
-  panel.add(ui.Label(title, {fontWeight: 'bold', fontSize: '12px', margin: '0 0 2px 0'}));
-  var bar = ui.Thumbnail({
-    image: ee.Image.pixelLonLat().select(0),
-    params: {
-      bbox: [0, 0, 1, 0.1], dimensions: '200x12', format: 'png',
-      min: 0, max: 1, palette: palette
-    },
-    style: {stretch: 'horizontal', height: '12px', margin: '0', padding: '0'}
-  });
-  panel.add(bar);
-  var isMm      = unit === 'mm';
-  var inMin     = isMm ? (minVal / MM_PER_INCH).toFixed(0) : null;
-  var inMax     = isMm ? (maxVal / MM_PER_INCH).toFixed(0) : null;
-  var leftText  = isMm ? (minVal + ' / ' + inMin)           : String(minVal);
-  var rightText = isMm ? (maxVal + '+ / ' + inMax + '+')    : (String(maxVal) + '+');
-  var midText   = isMm ? 'mm / in'                          : (unit || '');
-  var labels = ui.Panel({
-    widgets: [
-      ui.Label(leftText,  {margin: '0', fontSize: '10px'}),
-      ui.Label(midText,   {margin: '0 0 0 auto', fontSize: '10px', textAlign: 'center', stretch: 'horizontal'}),
-      ui.Label(rightText, {margin: '0', fontSize: '10px'})
-    ],
-    layout: ui.Panel.Layout.flow('horizontal'),
-    style:  {stretch: 'horizontal'}
-  });
-  panel.add(labels);
-  return panel;
-}
+var RASTER_LAYERS = ['DTW, new (handily 100 m)', 'DTW, Ma et al. (100 m)', 'DTW change, new - Ma',
+  'DTW uncertainty, new (sigma)', 'f per 100 m pixel, new DTW', 'f per 100 m pixel, Ma et al.',
+  'Distance to nearest training well'];
 
-function swatchRow(color, label, dashed) {
-  var box = ui.Label('', {
-    backgroundColor: color, padding: '0', margin: '0 6px 0 0',
-    border: dashed ? '1px dashed white' : ('1px solid ' + color),
-    width: '18px', height: '12px'
-  });
-  return ui.Panel({
-    widgets: [box, ui.Label(label, {fontSize: '11px', margin: '0'})],
-    layout: ui.Panel.Layout.flow('horizontal'),
-    style:  {margin: '1px 0'}
-  });
-}
-
-function updateLegend() {
-  legendPanel.clear();
-  legendPanel.add(ui.Label('Legend', {fontWeight: 'bold', margin: '0 0 2px 0'}));
-  legendPanel.add(ui.Label('Model: ' + MODEL_LABEL_BY_KEY[state.model],
-    {fontSize: '11px', color: '#333', margin: '0 0 2px 0'}));
-  if (state.layers['OpenET']) {
-    legendPanel.add(gradientLegend('OpenET (' + state.agg + ')', PALETTE_ET, 0, ET_MAX_MM, 'mm'));
-  }
-  if (state.layers['WTD']) {
-    legendPanel.add(ui.Label('Water table depth', {fontWeight: 'bold', fontSize: '12px', margin: '2px 0 2px 0'}));
-    WTD_CLASSES.forEach(function (c) {
-      legendPanel.add(swatchRow(c.color, c.label, false));
-    });
-  }
-  if (state.layers['GW-ET Fields']) {
-    legendPanel.add(gradientLegend('Fields: estimated GW-ET', PALETTE_GWET, 0, GWET_MAX_MM, 'mm'));
-    legendPanel.add(swatchRow('#00bfff', 'Field boundary (shown when zoomed in)', false));
-  }
-  if (state.layers['IrrMapper']) {
-    legendPanel.add(swatchRow('#00ffcc', 'IrrMapper: irrigated (class 0)', false));
-  }
-  if (state.layers['NWI Basins']) {
-    legendPanel.add(swatchRow('#ffdd00', 'NWI basin boundary', false));
-  }
-}
-
-// === MAP LAYER PAINTING =======================================================
-
-function refreshHighlight() {
-  var toRemove = [];
-  map.layers().forEach(function (layer) {
-    if (layer.getName() === HIGHLIGHT_LAYER) toRemove.push(layer);
-  });
-  toRemove.forEach(function (layer) { map.remove(layer); });
-
-  if (!state.selected) return;
-  var width = state.selected.type === 'basin' ? 3 : 2.5;
-  var styled = ee.FeatureCollection([ee.Feature(state.selected.feature)])
-    .style({color: HIGHLIGHT_COLOR, fillColor: '00000000', width: width});
-  map.addLayer(styled, {}, HIGHLIGHT_LAYER);
-}
-
-// The 28k field-polygon outlines are expensive to rasterize as a vector layer,
-// so only draw them once zoomed in enough to see individual fields. The GW-ET
-// raster fill still marks field extents at the statewide view.
-var FIELD_OUTLINE_MIN_ZOOM = 10;
-function paintFieldOutlines() {
-  var toRemove = [];
-  map.layers().forEach(function (l) { if (l.getName() === 'Field outlines') toRemove.push(l); });
-  toRemove.forEach(function (l) { map.remove(l); });
-  if (!state.layers['GW-ET Fields'] || state.zoom < FIELD_OUTLINE_MIN_ZOOM) return;
-  map.addLayer(fields.style({color: '00bfff', fillColor: '00000000', width: 1.5}),
-    {}, 'Field outlines');
+function addClassLayer(img, brk, pal, name, opacity) {
+  map.addLayer(classify(img, brk), {min: 0, max: brk.length, palette: pal, opacity: opacity}, name);
 }
 
 function paintLayers() {
   map.layers().reset();
-  var c = gwComponentsForYear(state.year, state.agg, state.model, state.dExtMult);
-
-  if (state.layers['OpenET']) {
-    map.addLayer(c.et.clip(nvBounds),
-      {min: 0, max: ET_MAX_MM, palette: PALETTE_ET, opacity: state.opacity},
-      'OpenET');
+  var L = state.layers;
+  var m = state.model;
+  var o = state.opacity;
+  if (L['DTW, new (handily 100 m)']) addClassLayer(dtw.select('dtw_new_m'), BRK_DTW, PAL_DTW, 'DTW, new (handily 100 m)', o);
+  if (L['DTW, Ma et al. (100 m)']) addClassLayer(dtw.select('dtw_ma_m'), BRK_DTW, PAL_DTW, 'DTW, Ma et al. (100 m)', o);
+  if (L['DTW change, new - Ma']) {
+    addClassLayer(dtw.select('dtw_new_m').subtract(dtw.select('dtw_ma_m')), BRK_DDTW, PAL_DDTW, 'DTW change, new - Ma', o);
   }
-  if (state.layers['WTD']) {
-    map.addLayer(wtdClassified.clip(nvBounds),
-      {min: 0, max: WTD_CLASSES.length - 1, palette: PALETTE_WTD_CLASS, opacity: state.opacity},
-      'Water table depth');
+  if (L['DTW uncertainty, new (sigma)']) addClassLayer(dtw.select('dtw_sigma_m'), BRK_SIG, PAL_SIG, 'DTW uncertainty, new (sigma)', o);
+  if (L['Distance to nearest training well']) {
+    var dist = wellsTrain.distance({searchRadius: 40000, maxError: 50}).divide(1000).clipToCollection(has);
+    addClassLayer(dist, BRK_DIST, PAL_DIST, 'Distance to nearest training well', o);
   }
-  if (state.layers['IrrMapper']) {
-    map.addLayer(c.irr.selfMask().clip(nvBounds),
-      {palette: ['#00ffcc'], opacity: state.opacity},
-      'IrrMapper irrigated');
+  if (L['f per 100 m pixel, new DTW']) addClassLayer(fPixelLayer(m, 'new'), BRK_F, PAL_F, 'f per 100 m pixel, new DTW', o);
+  if (L['f per 100 m pixel, Ma et al.']) addClassLayer(fPixelLayer(m, 'ma'), BRK_F, PAL_F, 'f per 100 m pixel, Ma et al.', o);
+  if (L['HA change, new - Ma']) {
+    var hv = has.filter(ee.Filter.gt('N_IRR', 0));
+    addClassLayer(ee.Image().float().paint(hv, 'D_' + m), BRK_HA, PAL_DIV, 'HA change, new - Ma', 0.8);
   }
-  if (state.layers['GW-ET Fields']) {
-    var fillOpacity = state.layers['OpenET'] ? 0.6 : 0.85;
-    var gwEtInFields = c.gwEtIrr.updateMask(fieldsMask);
-    map.addLayer(gwEtInFields.clip(nvBounds),
-      {min: 0, max: GWET_MAX_MM, palette: PALETTE_GWET, opacity: fillOpacity},
-      'GW-ET Fields');
+  if (L['Hydrographic areas']) {
+    map.addLayer(has.style({color: 'ffdd00', fillColor: '00000000', width: 1.2}), {}, 'Hydrographic areas');
   }
-  if (state.layers['NWI Basins']) {
-    var basinStyled = gwBasins.style({color: 'ffdd00', fillColor: '00000000', width: 2});
-    map.addLayer(basinStyled, {}, 'NWI Basins');
+  if (L['Fields (coloured)']) {
+    var fv = fieldValues(filteredFields());
+    var v = FIELD_VAR[state.fieldVar];
+    addClassLayer(ee.Image().float().paint(fv.fc, fv.prop), v.brk, v.pal, 'Fields (coloured)', 0.9);
   }
-  paintFieldOutlines(); // zoom-gated; cheap no-op when zoomed out
-
-  refreshHighlight();
-}
-
-// When zoomed in past the threshold, draw field outlines (and drop them when
-// zoomed back out) without a full raster refresh.
-map.onChangeZoom(function (zoom) { state.zoom = zoom; paintFieldOutlines(); });
-
-// === CHARTS ===================================================================
-
-function renderCharts() {
-  chartsPanel.clear();
-  chartsPanel.add(ui.Label('Charts', {fontWeight: 'bold', margin: '4px 0 2px 0'}));
-  chartsPanel.add(ui.Label(
-    'Click a field on the map for per-field stats (30 m). ' +
-    'Click outside any field to query the underlying NWI basin (500 m).',
-    {color: '#666', fontSize: '11px', margin: '0 0 4px 0'}
-  ));
-}
-
-// === CLICK HANDLERS (field at 30 m, basin at 500 m) ===========================
-
-var STATIC_CHART_WIDGETS = 2;
-
-function clearClickBlock() {
-  while (chartsPanel.widgets().length() > STATIC_CHART_WIDGETS) {
-    chartsPanel.widgets().remove(chartsPanel.widgets().get(STATIC_CHART_WIDGETS));
-  }
-  state.selected = null;
-  refreshHighlight();
-}
-
-function fmtNum(x, dec) {
-  return (x === null || x === undefined) ? '-' : Number(x).toFixed(dec);
-}
-
-function renderFieldCharts(fieldFeature) {
-  clearClickBlock();
-  state.selected = {feature: fieldFeature, type: 'field'};
-  refreshHighlight();
-
-  var loading = ui.Label('Querying clicked field at 30 m...', {fontSize: '11px', color: '#666'});
-  chartsPanel.add(loading);
-
-  var geom = ee.Feature(fieldFeature).geometry();
-  var c = gwComponentsForYear(state.year, state.agg, state.model, state.dExtMult);
-
-  var meansImg = c.et.rename('et_mm')
-    .addBands(c.gwEt.rename('gwEt_mm'))
-    .addBands(wtdNV.rename('wtd_m'))
-    .addBands(c.gwFrac.rename('gwFrac'))
-    .updateMask(c.irr);
-  var means = meansImg.reduceRegion({
-    reducer: ee.Reducer.mean(), geometry: geom, scale: 30, tileScale: 4
-  });
-  var irrAreaDict = c.irr.multiply(ee.Image.pixelArea()).rename('irr_area_m2').reduceRegion({
-    reducer: ee.Reducer.sum(), geometry: geom, scale: 30, tileScale: 4
-  });
-  // Carry the field's basin name through so the summary can show it.
-  var combined = ee.Dictionary(means).combine(ee.Dictionary(irrAreaDict))
-    .set('basin', ee.Feature(fieldFeature).get('Basin'));
-
-  var summaryLabel = ui.Label('Loading...', {fontSize: '11px', color: '#333'});
-  combined.evaluate(function (d, err) {
-    if (err)  { summaryLabel.setValue('Query failed: ' + err); return; }
-    if (!d)   { summaryLabel.setValue('No stats for clicked field.'); return; }
-    var irrAcres = (d.irr_area_m2 == null) ? null : d.irr_area_m2 / M2_PER_ACRE;
-    var etAcft   = (d.et_mm == null || d.irr_area_m2 == null)
-      ? null : d.et_mm / 1000 * d.irr_area_m2 / M3_PER_ACFT;
-    var gwEtAcft = (d.gwEt_mm == null || d.irr_area_m2 == null)
-      ? null : d.gwEt_mm / 1000 * d.irr_area_m2 / M3_PER_ACFT;
-    // Clean the join-key form "014_SurpriseValley" -> "Surprise Valley".
-    var basin = d.basin ? String(d.basin).replace(/^\d+_/, '').replace(/_/g, ' ')
-                                          .replace(/([a-z])([A-Z])/g, '$1 $2') : null;
-    summaryLabel.setValue(
-      'Basin: '      + (basin || '-') +
-      '  |  Irr acres: '  + fmtNum(irrAcres, 1) +
-      '  |  WTD: '   + fmtNum(d.wtd_m, 1) + ' m' +
-      '  |  ET: '    + fmtNum(etAcft, 1) + ' acre-ft' +
-      '  |  GW-ET: ' + fmtNum(gwEtAcft, 1) + ' acre-ft' +
-      '  (f(d) '     + fmtNum(d.gwFrac, 2) + ')'
-    );
-  });
-
-  var monthlyFc = monthlySeriesForGeom(state.year, c.gwFrac, geom, 30);
-  var monthlyChart = ui.Chart.feature.byFeature(monthlyFc, 'month', ['ET', 'GW-ET', 'ET_mm_shadow'])
-    .setChartType('LineChart')
-    .setOptions({
-      title: 'Clicked field - monthly ET & GW-ET, ' + state.year + ' (' + MODEL_LABEL_BY_KEY[state.model] + ')',
-      hAxis: {title: 'Month', viewWindow: {min: 1, max: 12}},
-      vAxes: {0: {title: 'inches'}, 1: {title: 'mm'}},
-      series: {
-        0: {color: '#2171b5', lineWidth: 2, pointSize: 4, targetAxisIndex: 0},
-        1: {color: '#08306b', lineWidth: 2, pointSize: 4, targetAxisIndex: 0},
-        2: {color: 'transparent', lineWidth: 0, pointSize: 0,
-            visibleInLegend: false, targetAxisIndex: 1}
-      },
-      legend: {position: 'bottom'}, height: 180
+  paintZoomLayers();
+  if (L['Training wells (new DTW)']) {
+    var styled = wellsTrain.map(function (w) {
+      var mon = ee.String(w.get('role')).equals('monitoring');
+      return w.set('style', ee.Dictionary(ee.Algorithms.If(mon,
+        {pointSize: 4, color: '000000', fillColor: 'ff7f00', width: 0.6},
+        {pointSize: 3, color: '000000', fillColor: '33a6ff', width: 0.4})));
     });
-
-  chartsPanel.widgets().remove(loading);
-  chartsPanel.add(ui.Panel({
-    widgets: [
-      ui.Label('-- Clicked field (30 m) --', {fontWeight: 'bold', margin: '8px 0 2px 0'}),
-      summaryLabel,
-      monthlyChart
-    ],
-    style: {margin: '0'}
-  }));
-}
-
-function renderBasinCharts(basinFeature) {
-  clearClickBlock();
-  state.selected = {feature: basinFeature, type: 'basin'};
+    map.addLayer(styled.style({styleProperty: 'style'}), {}, 'Training wells (new DTW)');
+  }
   refreshHighlight();
-
-  var loading = ui.Label('Querying NWI basin at 500 m...', {fontSize: '11px', color: '#666'});
-  chartsPanel.add(loading);
-
-  var basinF = ee.Feature(basinFeature);
-  var geom   = basinF.geometry();
-  var nameSrv = resolveBasinName(basinF);
-  var c = gwComponentsForYear(state.year, state.agg, state.model, state.dExtMult);
-
-  var summaryF = yearSummaryForGeom(state.year, state.agg, state.model, state.dExtMult, geom, REDUCE_SCALE);
-  var summaryLabel = ui.Label('Loading...', {fontSize: '11px', color: '#333'});
-  ee.Dictionary({
-    name:      nameSrv,
-    irr_acres: summaryF.get('irr_acres'),
-    et_acft:   summaryF.get('et_acft'),
-    gwEt_acft: summaryF.get('gwEt_acft'),
-    wtd_m:     summaryF.get('wtd_m'),
-    gwFrac:    summaryF.get('gwFrac')
-  }).evaluate(function (d, err) {
-    if (err) { summaryLabel.setValue('Query failed: ' + err); return; }
-    if (!d)  { summaryLabel.setValue('No stats for clicked basin.'); return; }
-    summaryLabel.setValue(
-      'Basin: '       + (d.name || '-') +
-      '  |  Irr ac: ' + fmtNum(d.irr_acres, 0) +
-      '  |  WTD: '    + fmtNum(d.wtd_m, 1) + ' m' +
-      '  |  f(d): '   + fmtNum(d.gwFrac, 2) +
-      '  |  ET: '     + fmtNum(d.et_acft, 0) + ' acre-ft' +
-      '  |  GW-ET: '  + fmtNum(d.gwEt_acft, 0) + ' acre-ft'
-    );
-  });
-
-  var monthlyFc = monthlySeriesForGeom(state.year, c.gwFrac, geom, REDUCE_SCALE);
-
-  var mmChart = ui.Chart.feature.byFeature(monthlyFc, 'month', ['ET', 'GW-ET', 'ET_mm_shadow'])
-    .setChartType('LineChart')
-    .setOptions({
-      title: 'Basin - monthly ET & GW-ET, ' + state.year + ' (' + MODEL_LABEL_BY_KEY[state.model] + ')',
-      hAxis: {title: 'Month', viewWindow: {min: 1, max: 12}},
-      vAxes: {0: {title: 'inches'}, 1: {title: 'mm'}},
-      series: {
-        0: {color: '#2171b5', lineWidth: 2, pointSize: 4, targetAxisIndex: 0},
-        1: {color: '#08306b', lineWidth: 2, pointSize: 4, targetAxisIndex: 0},
-        2: {color: 'transparent', lineWidth: 0, pointSize: 0,
-            visibleInLegend: false, targetAxisIndex: 1}
-      },
-      legend: {position: 'bottom'}, height: 180
-    });
-
-  var barChart = ui.Chart.feature.byFeature(monthlyFc, 'month', ['GW-ET_acft', 'nonGW_acft'])
-    .setChartType('ColumnChart')
-    .setOptions({
-      title: 'Basin - monthly ET volume, ' + state.year + ' (acre-ft, GW vs non-GW)',
-      hAxis: {title: 'Month', viewWindow: {min: 1, max: 12}},
-      vAxis: {title: 'acre-ft'},
-      isStacked: true,
-      series: {0: {color: '#08306b'}, 1: {color: '#c6dbef'}},
-      legend: {position: 'bottom'}, height: 180
-    });
-
-  chartsPanel.widgets().remove(loading);
-  chartsPanel.add(ui.Panel({
-    widgets: [
-      ui.Label('-- Clicked basin (500 m) --', {fontWeight: 'bold', margin: '8px 0 2px 0'}),
-      summaryLabel,
-      mmChart,
-      barChart
-    ],
-    style: {margin: '0'}
-  }));
 }
 
-function handleMapClick(coords) {
+// Field outlines and the 137k gwx wells are drawn only when zoomed in.
+function paintZoomLayers() {
+  var drop = [];
+  map.layers().forEach(function (l) {
+    if (l.getName() === 'Field outlines' || l.getName() === 'All gwx wells') drop.push(l);
+  });
+  drop.forEach(function (l) { map.remove(l); });
+  if (state.layers['Fields (coloured)'] && state.zoom >= OUTLINE_MIN_ZOOM) {
+    map.layers().insert(map.layers().length(), ui.Map.Layer(
+      ee.Image().byte().paint(filteredFields(), 1, 1), {palette: ['00e5ff']}, 'Field outlines'));
+  }
+  if (state.layers['All gwx wells with a depth to water'] && state.zoom >= ALL_WELLS_MIN_ZOOM) {
+    map.layers().insert(map.layers().length(), ui.Map.Layer(
+      wellsAll.style({pointSize: 2, color: '555555', fillColor: 'dddddd', width: 0.3}), {}, 'All gwx wells'));
+  }
+}
+map.onChangeZoom(function (z) { state.zoom = z; paintZoomLayers(); refreshHighlight(); });
+
+function refreshHighlight() {
+  var drop = [];
+  map.layers().forEach(function (l) { if (l.getName() === 'Selected') drop.push(l); });
+  drop.forEach(function (l) { map.remove(l); });
+  if (!state.selected) return;
+  var fc = ee.FeatureCollection([ee.Feature(state.selected)]);
+  map.addLayer(fc.style({color: HIGHLIGHT, fillColor: '00000000', width: 3, pointSize: 7}), {}, 'Selected');
+}
+
+// === LEGEND =====================================================================
+
+function swatch(color, text) {
+  return ui.Panel([
+    ui.Label('', {backgroundColor: '#' + color, padding: '6px 9px', margin: '1px 6px 1px 0',
+                  border: '1px solid #999'}),
+    ui.Label(text, {fontSize: '11px', margin: '1px 0'})
+  ], ui.Panel.Layout.flow('horizontal'));
+}
+function classLegend(title, brk, pal) {
+  var p = ui.Panel({style: {margin: '4px 0'}});
+  p.add(ui.Label(title, {fontWeight: 'bold', fontSize: '11px', margin: '0 0 2px 0'}));
+  classLabels(brk).forEach(function (t, i) { p.add(swatch(pal[i], t)); });
+  return p;
+}
+function updateLegend() {
+  legendPanel.clear();
+  var L = state.layers;
+  var v = FIELD_VAR[state.fieldVar];
+  if (L['Fields (coloured)']) legendPanel.add(classLegend('Fields: ' + v.label + ', ' + state.model, v.brk, v.pal));
+  if (L['DTW, new (handily 100 m)'] || L['DTW, Ma et al. (100 m)']) legendPanel.add(classLegend('DTW (m)', BRK_DTW, PAL_DTW));
+  if (L['DTW change, new - Ma']) legendPanel.add(classLegend('DTW change, new - Ma (m; red = new deeper)', BRK_DDTW, PAL_DDTW));
+  if (L['DTW uncertainty, new (sigma)']) legendPanel.add(classLegend('DTW sigma (m)', BRK_SIG, PAL_SIG));
+  if (L['Distance to nearest training well']) legendPanel.add(classLegend('Distance to nearest training well (km)', BRK_DIST, PAL_DIST));
+  if (L['f per 100 m pixel, new DTW'] || L['f per 100 m pixel, Ma et al.']) legendPanel.add(classLegend('f per pixel', BRK_F, PAL_F));
+  if (L['HA change, new - Ma']) legendPanel.add(classLegend('HA change, new - Ma (acre-ft/yr)', BRK_HA, PAL_DIV));
+  if (L['Training wells (new DTW)']) {
+    legendPanel.add(swatch('33a6ff', 'Training well: NDWR well log'));
+    legendPanel.add(swatch('ff7f00', 'Training well: monitoring well'));
+  }
+}
+
+// === SUMMARY OF THE FILTERED FIELDS ===============================================
+
+function updateSummary() {
+  summaryPanel.clear();
+  var m = state.model;
+  var label = small('Summing the fields shown...');
+  summaryPanel.add(label);
+  var fc = filteredFields();
+  var props = ['S_NEW_' + m, 'S_MA_' + m, 'D_' + m, 'ETA_AF'];
+  var sums = fc.reduceColumns(ee.Reducer.sum().repeat(4), props).get('sum');
+  ee.Dictionary({n: fc.size(), s: sums}).evaluate(function (r, err) {
+    if (err) { label.setValue('Summary failed: ' + err); return; }
+    var s = r.s;
+    label.setValue(fmt(r.n) + ' fields shown. ' + state.model + ': new ' + fmt(s[0]) + ', Ma ' + fmt(s[1]) +
+      ', change ' + fmt(s[2]) + ' acre-ft/yr (' + fmt(100 * s[0] / Math.max(s[3], 1e-9), 2) + '% vs ' +
+      fmt(100 * s[1] / Math.max(s[3], 1e-9), 2) + '% of ETa ' + fmt(s[3]) + ').');
+  });
+  var cols = ['NWI_ID', 'STATE', 'HYD_AREA', 'HA_NAME', 'SRC', 'CROP_LBL', 'ACRES', 'N_IRR_YRS', 'ETA_AF',
+    'DTW_NEW_M', 'DTW_MA_M', 'DTW_SIG_M', 'WT_DIST_KM', 'WT_N5KM', 'F_NEW_' + m, 'F_MA_' + m,
+    'S_NEW_' + m, 'S_MA_' + m, 'D_' + m];
+  var link = ui.Label('Preparing CSV of these fields...', {fontSize: '11px', margin: '0 0 2px 0'});
+  summaryPanel.add(link);
+  fc.select(cols).getDownloadURL('CSV', cols, 'nwi_gw_subsidy_fields_' + m, function (url, err) {
+    if (err) { link.setValue('CSV link failed: ' + err); return; }
+    link.setValue('Download these fields (CSV)');
+    link.setUrl(url);
+  });
+}
+
+// === CLICK: FIELD ===================================================================
+
+function row(cells, bold) {
+  return ui.Panel(cells.map(function (c, i) {
+    return ui.Label(c, {fontSize: '11px', margin: '0', width: i === 0 ? '130px' : '62px',
+      textAlign: i === 0 ? 'left' : 'right', fontWeight: bold ? 'bold' : 'normal'});
+  }), ui.Panel.Layout.flow('horizontal'), {margin: '0'});
+}
+
+function showField(feature) {
+  infoPanel.clear();
+  state.selected = feature;
+  refreshHighlight();
+  statusLabel.setValue('Field selected.');
+  var loading = small('Loading field...');
+  infoPanel.add(loading);
+  ee.Feature(feature).toDictionary().evaluate(function (p, err) {
+    infoPanel.remove(loading);
+    if (err || !p) { infoPanel.add(small('Query failed: ' + err)); return; }
+    var m = state.model;
+    infoPanel.add(ui.Label(p.NWI_ID + ': ' + haTitle(p.HA_NAME, p.HYD_AREA) + ', ' + p.STATE,
+      {fontWeight: 'bold', fontSize: '13px', margin: '2px 0'}));
+    infoPanel.add(small('Water right: ' + (SRC_TEXT[p.IRR_SRC] || '-') + (p.SRC_ASSUMED ? ' (assumed; no NV record)' : '') +
+      '.  Crop: ' + p.CROP_LBL + '.  ' + fmt(p.ACRES, 1) + ' acres.  Irrigated in ' + p.N_IRR_YRS + ' of 41 years.'));
+    var tex = p.TEXTURE || ('none sampled; Ma et al. used ' + (p.TEXTURE_MA || '-'));
+    infoPanel.add(small('Soil (POLARIS 0-100 cm): ' + tex + '.  Roots: ' + p.ROOT_CM + ' cm.  ETo ' + fmt(p.ET0_MMD, 2) +
+      ' mm/d.  Tan d_dec ' + fmt(p.DDEC_M, 2) + ' m, d_ext ' + fmt(p.DEXT_M, 2) + ' m, p ' + fmt(p.P, 2) + '.'));
+    infoPanel.add(small('Field mean DTW: new ' + fmt(p.DTW_NEW_M, 2) + ' m (min ' + fmt(p.DTW_NEW_MIN_M, 2) +
+      ', sigma ' + fmt(p.DTW_SIG_M, 1) + ');  Ma ' + (p.MA_COVER ? fmt(p.DTW_MA_M, 2) + ' m (min ' + fmt(p.DTW_MA_MIN_M, 2) + ')' : 'no coverage') +
+      '.  ETa ' + fmt(p.ETA_AF, 1) + ' acre-ft/yr.'));
+    infoPanel.add(small('Nearest training well ' + fmt(p.WT_DIST_KM, 2) + ' km (' + p.WT_NEAR_SRC + ' ' + p.WT_NEAR_ID +
+      ', well DTW ' + fmt(p.WT_NEAR_DTW_M, 1) + ' m); ' + p.WT_N1KM + ' within 1 km, ' + p.WT_N5KM + ' within 5 km.  ' +
+      'Nearest gwx well ' + fmt(p.W_DIST_KM, 2) + ' km; with a time series ' + fmt(p.W_TS_DIST_KM, 2) + ' km.'));
+
+    infoPanel.add(row(['Model (acre-ft/yr)', 'f new', 'f Ma', 'new', 'Ma', 'new - Ma'], true));
+    var models = [['TAN', 'Tan (run)'], ['TANR', 'Tan (recomputed)'], ['BANTA', 'Banta'], ['AVER', 'Averianov'], ['SHAH', 'Shah']];
+    models.forEach(function (mm) {
+      var k = mm[0];
+      var fMa = k === 'TANR' ? p.F_MA_TAN : p['F_MA_' + k];
+      var sMa = k === 'TANR' ? p.S_MA_TAN : p['S_MA_' + k];
+      infoPanel.add(row([mm[1] + (k === m ? ' *' : ''), fmt(p['F_NEW_' + k], 3), fmt(fMa, 3),
+        fmt(p['S_NEW_' + k], 1), fmt(sMa, 1), fmt(p['S_NEW_' + k] - sMa, 1)], k === m));
+    });
+    infoPanel.add(small('Field f = coverage-weighted mean of f over the 100 m pixels touching the field ' +
+      '(not f at the mean depth). Tan (recomputed) uses the same inputs as Banta, Averianov, Shah and Ma.'));
+    infoPanel.add(fCurveChart(p, m));
+    addFieldYearChart(p, m);
+  });
+}
+
+// f(d) for this field's parameters, with the field-mean depths of both maps.
+function fOf(model, d, dDec, dExt, p) {
+  if (model === 'BANTA') return Math.max(0, Math.min(1, 1 - d / dExt));
+  if (model === 'AVER') return Math.pow(Math.max(0, Math.min(1, 1 - d / dExt)), AVERIANOV_P);
+  var span = dExt - dDec;
+  if (span <= 0) return d <= dDec ? 1 : 0;
+  if (d <= dDec) return 1;
+  if (model === 'SHAH') return Math.exp(-Math.log(1 / SHAH_EPS) / span * (d - dDec));
+  if (d >= dExt) return 0;
+  return Math.pow((dExt - d) / span, p);
+}
+function fCurveChart(p, m) {
+  var key = m === 'TANR' ? 'TAN' : m;
+  var dMax = Math.max(4, Math.min(16, (p.DEXT_M || 6) * 1.05));
+  var cols = [{id: 'd', label: 'Depth to water (m)', type: 'number'},
+              {id: 'fn', label: 'f, new-DTW parameters', type: 'number'},
+              {id: 'fm', label: 'f, Ma et al. parameters', type: 'number'},
+              {id: 'vn', label: 'Field mean DTW, new', type: 'number'},
+              {id: 'vm', label: 'Field mean DTW, Ma', type: 'number'}];
+  var rows = [];
+  for (var i = 0; i <= 160; i++) {
+    var d = dMax * i / 160;
+    rows.push({c: [{v: d}, {v: fOf(key, d, p.DDEC_M, p.DEXT_M, p.P)},
+      {v: p.DDEC_MA_M === null || p.DDEC_MA_M === undefined ? null : fOf(key, d, p.DDEC_MA_M, p.DEXT_MA_M, p.P_MA)},
+      {v: null}, {v: null}]});
+  }
+  [[p.DTW_NEW_M, 3], [p.DTW_MA_M, 4]].forEach(function (x) {
+    if (x[0] === null || x[0] === undefined || x[0] > dMax) return;
+    [0, 1].forEach(function (y) {
+      var c = [{v: x[0]}, {v: null}, {v: null}, {v: null}, {v: null}];
+      c[x[1]] = {v: y};
+      rows.push({c: c});
+    });
+  });
+  rows.sort(function (a, b) { return a.c[0].v - b.c[0].v; });
+  return ui.Chart({cols: cols, rows: rows}, 'LineChart', {
+    title: MODEL_LABEL[key] + ': f against depth for this field', height: 200,
+    hAxis: {title: 'Depth to water (m)'}, vAxis: {title: 'f', viewWindow: {min: 0, max: 1}},
+    series: {0: {color: '#1d91c0'}, 1: {color: '#999999', lineDashStyle: [4, 3]},
+             2: {color: '#08306b', lineWidth: 2}, 3: {color: '#b35806', lineWidth: 2}},
+    interpolateNulls: false, legend: {position: 'bottom'}, chartArea: {width: '80%'}
+  });
+}
+
+// Annual subsidy, new vs Ma, for the selected model; ETa on the right axis.
+function addFieldYearChart(p, m) {
+  var note = small('Loading the 41 years...');
+  infoPanel.add(note);
+  fieldYears.filter(ee.Filter.eq('NWI_ID', p.NWI_ID)).sort('YEAR')
+    .reduceColumns(ee.Reducer.toList().repeat(5), ['YEAR', 'IRR', 'ETA_AF', 'S_NEW_' + m, 'S_MA_' + m])
+    .get('list').evaluate(function (L, err) {
+      infoPanel.remove(note);
+      if (err || !L) { infoPanel.add(small('Annual query failed: ' + err)); return; }
+      var cols = [{id: 'y', label: 'Year', type: 'number'},
+                  {id: 'n', label: 'Subsidy, new DTW', type: 'number'},
+                  {id: 'm', label: 'Subsidy, Ma et al.', type: 'number'},
+                  {id: 'e', label: 'ETa (right axis)', type: 'number'}];
+      var rows = L[0].map(function (y, i) {
+        var irr = L[1][i] === 1;
+        return {c: [{v: y}, {v: irr ? L[3][i] : null}, {v: irr ? L[4][i] : null}, {v: L[2][i]}]};
+      });
+      infoPanel.add(ui.Chart({cols: cols, rows: rows}, 'LineChart', {
+        title: 'Annual subsidy, ' + MODEL_LABEL[m] + ' (acre-ft; gaps = not irrigated)', height: 210,
+        hAxis: {title: 'Year', format: '####'}, vAxes: {0: {title: 'subsidy (acre-ft)'}, 1: {title: 'ETa (acre-ft)'}},
+        series: {0: {color: '#08306b', pointSize: 3, targetAxisIndex: 0},
+                 1: {color: '#b35806', pointSize: 3, targetAxisIndex: 0},
+                 2: {color: '#bbbbbb', lineWidth: 1, targetAxisIndex: 1}},
+        interpolateNulls: false, legend: {position: 'bottom'}, chartArea: {width: '75%'}
+      }));
+    });
+}
+
+// === CLICK: HA =======================================================================
+
+function showHa(feature) {
+  infoPanel.clear();
+  state.selected = feature;
+  refreshHighlight();
+  statusLabel.setValue('Hydrographic area selected.');
+  var loading = small('Loading HA...');
+  infoPanel.add(loading);
+  ee.Feature(feature).toDictionary().evaluate(function (p, err) {
+    infoPanel.remove(loading);
+    if (err || !p) { infoPanel.add(small('Query failed: ' + err)); return; }
+    var m = state.model;
+    infoPanel.add(ui.Label(haTitle(p.HA_NAME, p.HYD_AREA), {fontWeight: 'bold', fontSize: '13px', margin: '2px 0'}));
+    infoPanel.add(small(fmt(p.N_FIELDS) + ' fields, ' + fmt(p.N_IRR) + ' irrigated in at least one year; ETa ' +
+      fmt(p.ETA_AF) + ' acre-ft/yr.  Fields with a Tan subsidy > 0.5 acre-ft/yr: new ' + fmt(p.N_SUB_NEW) +
+      ', Ma ' + fmt(p.N_SUB_MA) + '.'));
+    infoPanel.add(small('Acre-weighted field DTW (fields covered by both maps, ' + fmt(p.N_COVER) + '): new ' +
+      fmt(p.DTW_NEW_M, 2) + ' m, Ma ' + fmt(p.DTW_MA_M, 2) + ' m.'));
+    infoPanel.add(small('Training wells: median distance from irrigated fields ' + fmt(p.MED_WT_KM, 1) + ' km; ' +
+      fmt(p.N_FAR5) + ' fields > 5 km away, with Tan subsidy new ' + fmt(p.S_NEW_TAN_FAR5) + ', Ma ' +
+      fmt(p.S_MA_TAN_FAR5) + ' acre-ft/yr.'));
+    infoPanel.add(row(['Model (acre-ft/yr)', 'new', 'Ma', 'new - Ma', 'Ma report'], true));
+    [['TAN', 'Tan (run)'], ['BANTA', 'Banta'], ['AVER', 'Averianov'], ['SHAH', 'Shah']].forEach(function (mm) {
+      var k = mm[0];
+      infoPanel.add(row([mm[1] + (k === m ? ' *' : ''), fmt(p['S_NEW_' + k]), fmt(p['S_MA_' + k]), fmt(p['D_' + k]),
+        k === 'TAN' ? fmt(p.S_MA_TAN_RPT) : ''], k === m));
+    });
+    infoPanel.add(small('Ma report = docs/tables/ha_gw_subsidy_new_vs_ma.csv. Tan recomputed with the same ' +
+      'inputs as the Ma values: ' + fmt(p.S_NEW_TANR) + ' acre-ft/yr.'));
+    addHaYearChart(p, m);
+    addTopFields(p, m);
+  });
+}
+
+function addHaYearChart(p, m) {
+  haYears.filter(ee.Filter.eq('HYD_AREA', p.HYD_AREA)).sort('YEAR')
+    .reduceColumns(ee.Reducer.toList().repeat(3), ['YEAR', 'S_NEW_' + m, 'S_MA_' + m]).get('list')
+    .evaluate(function (L, err) {
+      if (err || !L || !L[0].length) return;
+      var data = [['Year', 'New DTW', 'Ma et al.']];
+      L[0].forEach(function (y, i) { data.push([y, L[1][i], L[2][i]]); });
+      infoPanel.add(ui.Chart(data, 'LineChart', {
+        title: 'Annual subsidy, irrigated fields, ' + MODEL_LABEL[m] + ' (acre-ft)', height: 200,
+        hAxis: {format: '####'}, series: {0: {color: '#08306b'}, 1: {color: '#b35806'}},
+        legend: {position: 'bottom'}, chartArea: {width: '78%'}
+      }));
+    });
+}
+
+function addTopFields(p, m) {
+  var top = fieldsAll.filter(ee.Filter.eq('HYD_AREA', p.HYD_AREA)).filter(ee.Filter.gt('N_IRR_YRS', 0))
+    .map(function (f) { return f.set('absD', ee.Number(f.get('D_' + m)).abs()); })
+    .sort('absD', false).limit(8);
+  top.reduceColumns(ee.Reducer.toList().repeat(4), ['NWI_ID', 'D_' + m, 'S_NEW_' + m, 'WT_DIST_KM']).get('list')
+    .evaluate(function (L, err) {
+      if (err || !L || !L[0].length) return;
+      infoPanel.add(small('Fields with the largest change (click to open):', '#333'));
+      L[0].forEach(function (id, i) {
+        infoPanel.add(ui.Button({
+          label: id + ': change ' + fmt(L[1][i], 1) + ', new ' + fmt(L[2][i], 1) + ' acre-ft/yr; well ' + fmt(L[3][i], 1) + ' km',
+          style: {margin: '0', fontSize: '11px', stretch: 'horizontal'},
+          onClick: function () { selectField(id); }
+        }));
+      });
+    });
+}
+
+function selectField(id) {
+  var f = ee.Feature(fieldsAll.filter(ee.Filter.eq('NWI_ID', id)).first());
+  f.geometry().centroid(1).coordinates().evaluate(function (c) {
+    if (c) map.setCenter(c[0], c[1], Math.max(state.zoom, 13));
+  });
+  showField(f);
+}
+
+// === CLICK: WELL ==================================================================
+
+function showWell(feature) {
+  infoPanel.clear();
+  state.selected = feature;
+  refreshHighlight();
+  statusLabel.setValue('Training well selected.');
+  ee.Feature(feature).toDictionary().evaluate(function (p, err) {
+    if (err || !p) { infoPanel.add(small('Query failed: ' + err)); return; }
+    infoPanel.add(ui.Label('Training well ' + p.canonical_id, {fontWeight: 'bold', fontSize: '13px', margin: '2px 0'}));
+    infoPanel.add(small('Source ' + p.source + ', role ' + p.role + ', confinement ' + p.confine + '.'));
+    infoPanel.add(small('Well depth to water ' + fmt(p.dtw_m, 2) + ' m.  At its 100 m pixel: new map ' + fmt(p.dtw_new_m, 2) +
+      ' m (sigma ' + fmt(p.dtw_sigma_m, 1) + '), Ma ' + fmt(p.dtw_ma_m, 2) + ' m.  Map - well: new ' +
+      fmt(p.new_minus_well_m, 2) + ' m, Ma ' + fmt(p.ma_minus_well_m, 2) + ' m.'));
+    infoPanel.add(small('The new map was fitted to these wells, so its difference here is not an independent check.'));
+  });
+}
+
+// === CLICK HANDLER =================================================================
+
+map.onClick(function (coords) {
   var pt = ee.Geometry.Point([coords.lon, coords.lat]);
   statusLabel.setValue('Querying...');
-  var clickedField = fields.filterBounds(pt).first();
-  clickedField.evaluate(function (f) {
-    if (f) {
-      statusLabel.setValue('');
-      renderFieldCharts(clickedField);
-      return;
-    }
-    var clickedBasin = gwBasins.filterBounds(pt).first();
-    clickedBasin.evaluate(function (b) {
-      statusLabel.setValue('');
-      if (b) renderBasinCharts(clickedBasin);
-      else   clearClickBlock();
-    });
+  var tol = map.getScale() * 6;   // about 6 screen pixels
+  var tryWell = state.layers['Training wells (new DTW)'];
+  var well = tryWell ? wellsTrain.filterBounds(pt.buffer(tol)).first() : null;
+  var field = fieldsAll.filterBounds(pt).first();
+  var ha = has.filterBounds(pt).first();
+  ee.Dictionary({well: tryWell ? well : null, field: field, ha: ha}).evaluate(function (r, err) {
+    if (err) { statusLabel.setValue('Query failed: ' + err); return; }
+    if (r.well) { showWell(well); return; }
+    if (r.field) { showField(field); return; }
+    if (r.ha) { showHa(ha); return; }
+    infoPanel.clear();
+    state.selected = null;
+    refreshHighlight();
+    statusLabel.setValue('Nothing here.');
+  });
+});
+
+// === RANKING, CHECKS, NOTES, REFERENCES ===========================================
+
+function buildRanking(body) {
+  var m = state.model;
+  body.add(small('By total change, new - Ma, over irrigated fields (' + MODEL_LABEL[m] + '). Click to open.'));
+  var hv = has.filter(ee.Filter.gt('N_IRR', 0));
+  [['Largest decreases (new < Ma)', true], ['Largest increases (new > Ma)', false]].forEach(function (g) {
+    body.add(ui.Label(g[0], {fontSize: '11px', fontWeight: 'bold', margin: '4px 0 0 0'}));
+    var top = hv.sort('D_' + m, g[1]).limit(8);
+    top.reduceColumns(ee.Reducer.toList().repeat(5), ['HYD_AREA', 'HA_NAME', 'D_' + m, 'S_NEW_' + m, 'S_MA_' + m])
+      .get('list').evaluate(function (L) {
+        if (!L) return;
+        L[0].forEach(function (code, i) {
+          body.add(ui.Button({
+            label: haTitle(L[1][i], code) + ': ' + fmt(L[2][i]) + ' (new ' + fmt(L[3][i]) + ', Ma ' + fmt(L[4][i]) + ')',
+            style: {margin: '0', fontSize: '11px', stretch: 'horizontal'},
+            onClick: function () {
+              var f = ee.Feature(has.filter(ee.Filter.eq('HYD_AREA', code)).first());
+              map.centerObject(f, 9);
+              showHa(f);
+            }
+          }));
+        });
+      });
   });
 }
 
-map.onClick(handleMapClick);
-
-// === REFRESH ==================================================================
-
-function refresh() {
-  statusLabel.setValue('Computing...');
-  paintLayers();
-  renderCharts();
-  updateLegend();
-  statusLabel.setValue('');
+function buildChecks(body) {
+  body.add(small('Computed now from the app\'s tables (Tan) and compared with the report.'));
+  var irr = fieldsAll.filter(ee.Filter.gt('N_IRR_YRS', 0));
+  var cov = irr.filter(ee.Filter.eq('MA_COVER', 1));
+  var sumAll = irr.reduceColumns(ee.Reducer.sum().repeat(4), ['S_NEW_TAN', 'ETA_AF', 'S_NEW_TANR', 'S_MA_TAN']).get('sum');
+  var sumCov = cov.reduceColumns(ee.Reducer.sum().repeat(2), ['S_NEW_TAN', 'S_MA_TAN']).get('sum');
+  var med = cov.reduceColumns(ee.Reducer.median().repeat(2), ['DTW_NEW_M', 'DTW_MA_M']).get('median');
+  ee.Dictionary({a: sumAll, c: sumCov, n: cov.size(), md: med}).evaluate(function (r, err) {
+    if (err) { body.add(small('Checks failed: ' + err)); return; }
+    function line(text, app, rep, dec, exact) {
+      var same = Number(app).toFixed(dec || 0) === Number(rep).toFixed(dec || 0);
+      body.add(row([text, fmt(app, dec), fmt(rep, dec), exact ? (same ? 'same' : 'DIFFERS') : (same ? 'same' : 'see note')], false));
+    }
+    body.add(row(['', 'app', 'report', ''], true));
+    line('Tan, new DTW, all fields', r.a[0], REPORT.subsidyAll, 0, true);
+    line('ETa, irrigated field-years', r.a[1], REPORT.etaAll, 0, true);
+    line('Fields covered by both maps', r.n, REPORT.nCovered, 0, false);
+    line('Covered fields, Tan, new DTW', r.c[0], REPORT.coveredNew, 0, false);
+    line('Covered fields, Tan, Ma et al.', r.c[1], REPORT.coveredMa, 0, false);
+    line('Median field DTW, new (m)', r.md[0], REPORT.medianDtwNew, 1, false);
+    line('Median field DTW, Ma (m)', r.md[1], REPORT.medianDtwMa, 1, false);
+    line('Tan recomputed, all fields', r.a[2], REPORT.subsidyAll, 0, false);
+    body.add(small('Tan with the new DTW is the run\'s value and matches exactly. The Ma et al. values are ' +
+      'recomputed (Ma resampled to the 100 m grid by area-weighted average, same fields and code); the ' +
+      'report\'s Ma comparison used a 100 m Ma file and run inputs that are not available here. Most of the ' +
+      'difference is in Lovelock Valley (073) and Carson Desert (101), where Tan recomputed from the same ' +
+      'inputs is also above the run. Fig. 11 prints the medians as "Ma vs new"; docs/GW_SUBSIDY.md lists them the other way round.'));
+  });
 }
 
-// === INITIAL RENDER ===========================================================
+function buildNotes(body) {
+  [
+    'Subsidy: each month min(f x ETa, max(ETa - effective precipitation, 0)); summed over field-years that ' +
+      'IrrMapper marks more than 50% irrigated and divided by 41 years (1985-2025): acre-ft/yr, as in the report.',
+    'f: fraction of ETa that groundwater can supply. Tan et al. (2025) parameters (d_dec, d_ext, p) from the ' +
+      'field\'s POLARIS texture (0-100 cm), rooting depth (200 cm for alfalfa, orchards, vineyards, forest, ' +
+      'shrubland and wetlands; else 100 cm) and April-October ETo. Banta (d_dec = 0, p = 1), Averianov ' +
+      '(d_dec = 0, p = 3) and Shah (exponential decay, f = 0.02 at d_ext) use the same d_ext.',
+    'Field f is the coverage-weighted mean of f over the field\'s 100 m DTW pixels. Fields with no pixel ' +
+      'shallower than 16 m have f = 0 (for Shah too, as in the run).',
+    'New DTW: handily NV parity map, statewide 100 m (build 2026-10-08). The run used an EPSG:5070 copy of ' +
+      'it; the copy and the run\'s OpenET ETo are not available here. Tan recomputed from this map totals ' +
+      '34,993 acre-ft/yr against the run\'s 34,733 (+0.75%): the size of the error in the recomputed values.',
+    'Ma et al. (2026): 24 m map (wtd_nevada.tif) averaged onto the same 100 m grid; Nevada only, so fields ' +
+      'outside Nevada have no Ma value (MA_COVER = 0). "Only fields covered by the Ma et al. map" gives the ' +
+      'like-for-like comparison.',
+    'Training wells: the 9,448 wells the handily NV parity model was trained on ' +
+      '(handily_wells_train_nv_parity.csv, dated 2026-10-21): 8,628 NDWR well-log depths and 820 monitoring ' +
+      'wells. Distances are from the field boundary (0 = a well inside the field). The map is within a median ' +
+      '1.8 m of the training wells and 6.0 m of other wells.',
+    'DTW maps are single snapshots; well depths are long-term means.',
+    'Built by gee/prep/ in the nwi-t1-ag-water-use repository (branch gw-subsidy-assessments).'
+  ].forEach(function (t) { body.add(small('- ' + t)); });
+}
+
+var REFERENCES = [
+  {tag: 'Tan model', text: 'Tan, S.-C., Jiang, X.-W., et al. (2025). Revisiting the quantitative relationship between ' +
+    'groundwater evapotranspiration and water table depth: A numerical study. J. Hydrol., 658, 133100.',
+   url: 'https://doi.org/10.1016/j.jhydrol.2025.133100'},
+  {tag: 'Shah model', text: 'Shah, N., Nachabe, M., & Ross, M. (2007). Extinction depth and evapotranspiration from ' +
+    'ground water under selected land covers. Groundwater, 45(3), 329-338.',
+   url: 'https://doi.org/10.1111/j.1745-6584.2007.00302.x'},
+  {tag: 'Averianov model', text: 'Averianov, S. F. (1956). Seepage from irrigation canals and its influence on ' +
+    'regime of ground water.'},
+  {tag: 'Banta model', text: 'Banta, E. R. (2000). MODFLOW-2000, documentation of packages for simulating ' +
+    'evapotranspiration with a segmented function (ETS1) and drains with return flow (DRT1). USGS OFR 2000-466.',
+   url: 'https://doi.org/10.3133/ofr00466'},
+  {tag: 'Ma et al. DTW', text: 'Ma, Y., Condon, L. E., Koch, J., et al. (2026). High resolution US water table depth ' +
+    'estimates reveal quantity of accessible groundwater. Communications Earth & Environment, 7(1), 45.',
+   url: 'https://doi.org/10.1038/s43247-025-03094-3'},
+  {tag: 'POLARIS', text: 'Chaney, N. W., et al. (2019). POLARIS soil properties: 30-m probabilistic maps of soil ' +
+    'properties over the contiguous United States. Water Resour. Res., 55(4), 2916-2938.',
+   url: 'https://doi.org/10.1029/2018WR022797'},
+  {tag: 'Soil hydraulics', text: 'Carsel, R. F., & Parrish, R. S. (1988). Developing joint probability distributions ' +
+    'of soil water retention characteristics. Water Resour. Res., 24(5), 755-769.',
+   url: 'https://doi.org/10.1029/WR024i005p00755'},
+  {tag: 'OpenET', text: 'Melton, F., et al. (2022). OpenET: Filling a critical data gap in water management for the ' +
+    'western United States. JAWRA, 58(6), 971-994.', url: 'https://doi.org/10.1111/1752-1688.12956'},
+  {tag: 'OpenET', text: 'Volk, J. M., et al. (2024). Assessing the accuracy of OpenET satellite-based ' +
+    'evapotranspiration data to support water resource and land management applications. Nature Water, 2, 193-205.',
+   url: 'https://doi.org/10.1038/s44221-023-00181-7'},
+  {tag: 'IrrMapper', text: 'Ketchum, D., et al. (2020). IrrMapper: A machine learning approach for high resolution ' +
+    'mapping of irrigated agriculture across the western U.S. Remote Sensing, 12(14), 2328.',
+   url: 'https://doi.org/10.3390/rs12142328'},
+  {tag: 'CDL', text: 'Boryan, C., Yang, Z., Mueller, R., & Craig, M. (2011). Monitoring US agriculture: the USDA NASS ' +
+    'Cropland Data Layer program. Geocarto International, 26(5), 341-358.',
+   url: 'https://doi.org/10.1080/10106049.2011.562309'},
+  {tag: 'GEE', text: 'Gorelick, N., et al. (2017). Google Earth Engine: Planetary-scale geospatial analysis for ' +
+    'everyone. Remote Sensing of Environment, 202, 18-27.', url: 'https://doi.org/10.1016/j.rse.2017.06.031'},
+  {tag: 'GEE community catalog', text: 'Roy, S., Majumdar, S., & Swetnam, T. (2025). ' +
+    'samapriya/awesome-gee-community-datasets: Community Catalog (3.9.0). Zenodo.',
+   url: 'https://doi.org/10.5281/zenodo.17641528'}
+];
+function buildReferences(body) {
+  REFERENCES.forEach(function (r) {
+    var tagStyle = {fontSize: '10px', fontWeight: 'bold', margin: '0 4px 0 0', color: r.url ? NV_BLUE : '#222'};
+    body.add(ui.Panel([
+      r.url ? ui.Label('[' + r.tag + ']', tagStyle, r.url) : ui.Label('[' + r.tag + ']', tagStyle),
+      ui.Label(r.text, {fontSize: '10px', color: '#444', margin: '0', stretch: 'horizontal'})
+    ], ui.Panel.Layout.flow('horizontal'), {margin: '0 0 4px 0', stretch: 'horizontal'}));
+  });
+}
+
+// === REFRESH ======================================================================
+
+function refresh() {
+  paintLayers();
+  updateLegend();
+  updateSummary();
+  rankSection.rebuild();
+}
 
 refresh();
