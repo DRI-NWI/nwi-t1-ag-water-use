@@ -7,8 +7,8 @@ trained on, and how the four f(d) models compare.
 
 **Open it.** Paste [`nwi_gw_et_explorer_app.js`](nwi_gw_et_explorer_app.js) into the
 [Earth Engine Code Editor](https://code.earthengine.google.com) and press Run. It reads the
-assets in `projects/nwi-usgs/assets/nwi_gw_subsidy/`; your account needs read access to them
-(project `nwi-usgs` members have it; share the folder with others in the Code Editor's Assets tab).
+assets in `projects/nwi-usgs/assets/nwi_gw_subsidy/`. They are public, so the app runs from any
+Earth Engine account.
 
 The app started as an unchanged copy of the nwi-gw-subsidy app (`DRI-NWI/nwi-gw-subsidy`,
 `gee/nwi_gw_et_explorer_app.js` at commit 7262f69; first commit on this branch) and was then
@@ -79,6 +79,9 @@ and is the one used.
 | `wells_gwx_nv` | 137,138 gwx wells with a depth to water (`gwx_nevada_wells.zip`, MD5 `e06c9fe9ea211b438bf2722c523ea459`); `is_train` marks those at a training-well location |
 | `dtw_100m_epsg5070` | `dtw_new_m`: handily NV parity DTW, statewide 100 m, 2026-10-08 build (`nv_dtw_parity_statewide_100m.zip`, MD5 `20af7ee2027ac234774f5a026ee9b4d8`), tagged EPSG:5070 with no resampling. `dtw_sigma_m`: its uncertainty. `dtw_ma_m`: Ma et al. `wtd_nevada.tif` averaged onto the same grid |
 
+**Sharing.** All seven assets are readable by anyone (Earth Engine `allUsers`); step 07 sets this.
+The folder is not public, so it cannot be listed, and other assets put in it stay private.
+
 **Training wells.** The training-well file is dated 2026-10-21, after the 2026-10-08 map build. The
 map is within a median 1.8 m of these wells and 6.0 m of other gwx wells, so this set fits the map
 the run used. Distances are measured from the field boundary (0 = a well inside the field).
@@ -132,5 +135,5 @@ python 08_check_assets.py --project nwi-usgs
 | 04 | f for 4 models × 2 maps with the run's `scripts/gw_subsidy` code (POLARIS texture through Earth Engine) | f (Tan, new DTW) against the run's `gw_frac`; each Ma candidate against the report's HA table (recorded in `04_field_fractions_checks.json`) |
 | 05 | Training wells, gwx wells, distances from every field | Map-minus-well depth at training and other wells |
 | 06 | The app's tables | Tan with the new DTW equals the run in every field-month; statewide and HA totals equal the report; comparisons with the report's Ma numbers recorded in `app/app_summary.json` |
-| 07 | Upload to Cloud Storage and ingestion as Earth Engine assets | Explicit column types (HA codes stay text); provenance stored as asset properties |
-| 08 | Checks the uploaded assets on Earth Engine | Types survived ingestion; the report's statewide and HA numbers; annual rows add up; every app layer draws and every click query, ranking and CSV link runs |
+| 07 | Upload to Cloud Storage and ingestion as Earth Engine assets, which are then made public (`--no-public` skips this) | Explicit column types (HA codes stay text); provenance stored as asset properties |
+| 08 | Checks the uploaded assets on Earth Engine | Types survived ingestion; every asset is public (`--no-public` skips this); the report's statewide and HA numbers; annual rows add up; every app layer draws and every click query, ranking and CSV link runs |

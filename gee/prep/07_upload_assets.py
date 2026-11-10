@@ -5,10 +5,13 @@ GEE app input 7: upload the app's tables and rasters to Earth Engine.
 Copies the files from steps 3 and 6 to Cloud Storage (gs://<bucket>/nwi_gw_subsidy/<run_id>/) and
 ingests them as Earth Engine assets under projects/<project>/assets/nwi_gw_subsidy/. Every CSV
 column gets an explicit type, so codes such as HYD_AREA "014" stay strings. Each asset records where
-it came from in its properties.
+it came from in its properties. The assets are then made readable by anyone, so the app runs from any
+Earth Engine account (--no-public skips this). The folder stays private, so other assets put in it are
+not public.
 
 Usage:
-    python 07_upload_assets.py [--project nwi-usgs] [--bucket nwi-usgs-gee-exports] [--overwrite] [--out DIR]
+    python 07_upload_assets.py [--project nwi-usgs] [--bucket nwi-usgs-gee-exports] [--overwrite] [--no-public]
+                               [--out DIR]
 """
 
 from __future__ import annotations
@@ -89,6 +92,8 @@ def main():
     ap.add_argument("--bucket", default="nwi-usgs-gee-exports")
     ap.add_argument("--overwrite", action="store_true", help="replace assets that already exist")
     ap.add_argument("--only", nargs="*", default=None, help="asset names to (re)ingest; default all")
+    ap.add_argument("--public", action=argparse.BooleanOptionalAction, default=True,
+                    help="make the assets readable by anyone (default)")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
     out = out_dir(args.out)
@@ -191,6 +196,33 @@ def main():
                 print(f"[ee] {name}: {state} {op.get('error', {}).get('message', '')}", flush=True)
                 pending.pop(name)
     print("[ee] done" if not pending else f"[ee] still running after 2 h: {sorted(pending)}")
+
+    # A re-ingested asset starts private, so this runs on every asset of this call, new or existing.
+    if args.public:
+        for name in sorted(todo):
+            asset = f"{root}/{name}"
+            if not _exists(ee, asset):
+                print(f"[ee] {name}: not on Earth Engine yet; rerun this step to make it public")
+                continue
+            print(f"[ee] {name}: {'made public' if make_public(ee, asset) else 'already public'}")
+
+
+def make_public(ee, asset):
+    """Add allUsers to the asset's readers, keeping its other bindings. False if it was already public."""
+    policy = ee.data.getIamPolicy(asset)
+    bindings = [dict(b) for b in policy.get("bindings", [])]
+    viewer = next((b for b in bindings if b["role"] == "roles/viewer"), None)
+    if viewer is None:
+        bindings.append({"role": "roles/viewer", "members": ["allUsers"]})
+    elif "allUsers" in viewer["members"]:
+        return False
+    else:
+        viewer["members"] = list(viewer["members"]) + ["allUsers"]
+    new = {"bindings": bindings}
+    if "etag" in policy:
+        new["etag"] = policy["etag"]      # refused if the policy changed since it was read
+    ee.data.setIamPolicy(asset, new)
+    return True
 
 
 def _exists(ee, asset):

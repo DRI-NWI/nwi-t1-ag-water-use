@@ -3,7 +3,8 @@
 GEE app check 8: the uploaded assets reproduce the report, and the app's expressions run.
 
 On Earth Engine, from the assets in projects/<project>/assets/nwi_gw_subsidy/:
-  1. property types survived ingestion (HA codes are text, values are numbers);
+  1. property types survived ingestion (HA codes are text, values are numbers), and every asset is
+     readable by anyone, so the app runs from any Earth Engine account (--no-public skips this);
   2. the report's numbers: Tan subsidy with the new DTW (34,733 acre-ft/yr), ETa, and the HA values of
      docs/tables/ha_gw_subsidy_new_vs_ma.csv;
   3. field-year and HA-year rows add up to the field and HA means (x 41 years);
@@ -11,7 +12,7 @@ On Earth Engine, from the assets in projects/<project>/assets/nwi_gw_subsidy/:
      drawn or evaluated.
 
 Usage:
-    python 08_check_assets.py [--project nwi-usgs]
+    python 08_check_assets.py [--project nwi-usgs] [--no-public]
 """
 
 from __future__ import annotations
@@ -39,6 +40,8 @@ def check(name, ok, detail=""):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--project", default="nwi-usgs")
+    ap.add_argument("--public", action=argparse.BooleanOptionalAction, default=True,
+                    help="check that every asset is readable by anyone (default)")
     args = ap.parse_args()
     import ee
     ee.Initialize(project=args.project)
@@ -65,6 +68,12 @@ def main():
     check("HA '014' found by its text code", h0.get("HA_NAME") == "SurpriseValley", h0.get("HA_NAME"))
     check("DTW bands", dtw.bandNames().getInfo() == ["dtw_new_m", "dtw_sigma_m", "dtw_ma_m"])
     check("DTW projection", dtw.select("dtw_new_m").projection().crs().getInfo() == "EPSG:5070")
+    if args.public:
+        names = ["fields_gw_subsidy_20261018", "field_year_gw_subsidy_20261018", "ha_gw_subsidy_20261018",
+                 "ha_year_gw_subsidy_20261018", "wells_handily_train_nv", "wells_gwx_nv", "dtw_100m_epsg5070"]
+        private = [n for n in names if not any("allUsers" in b.get("members", [])
+                                              for b in ee.data.getIamPolicy(root + n).get("bindings", []))]
+        check("every asset is readable by anyone", not private, ", ".join(private) or f"{len(names)} assets")
 
     print("2. The report's numbers")
     irr = fields.filter(ee.Filter.gt("N_IRR_YRS", 0))
