@@ -12,7 +12,8 @@
 //
 //   * New DTW: the handily NV parity map at 30 m (gs://ucrc-wtd/handily/nv/handily_dtw_nv_parity_30m.tif,
 //     2026-10-21). f and subsidy for every model with it, and with Ma et al. on the same 30 m grid, are
-//     computed with the run's code (scripts/gw_subsidy) on the same 2026-08-20 fields.
+//     computed with the run's code (scripts/gw_subsidy) on the same 2026-08-20 fields. Ma et al. is
+//     wtd_nevada.tif in Nevada and the dataset's other state files (community catalog HRES-WTD) elsewhere.
 //   * The run's own Tan values (F_RUN_TAN, S_RUN_TAN) were made with its 2026-10-08 100 m map. They
 //     reproduce README.md and docs/tables/ha_gw_subsidy_new_vs_ma.csv exactly and are shown for reference.
 //
@@ -236,7 +237,7 @@ function filteredFields() {
   var m = state.model;
   if (state.population === 'irrigated') fc = fc.filter(ee.Filter.gt('N_IRR_YRS', 0));
   if (state.nvOnly) fc = fc.filter(ee.Filter.eq('STATE', 'NV'));
-  if (state.maCovered) fc = fc.filter(ee.Filter.eq('MA_COVER', 1));
+  if (state.maCovered) fc = fc.filter(ee.Filter.eq('MA_NV', 1));   // the report's comparison set
   if (state.withSubsidy) {
     fc = fc.filter(ee.Filter.or(ee.Filter.gt('S_NEW_' + m, 0.5), ee.Filter.gt('S_MA_' + m, 0.5)));
   }
@@ -318,7 +319,7 @@ function filterBox(label, key) {
     onChange: function (v) { state[key] = v; refresh(); }});
 }
 leftPanel.add(filterBox('Nevada fields only', 'nvOnly'));
-leftPanel.add(filterBox('Only fields covered by the Ma et al. map (like-for-like)', 'maCovered'));
+leftPanel.add(filterBox('Only fields the report compared (Nevada Ma file)', 'maCovered'));
 leftPanel.add(filterBox('Only fields with a subsidy > 0.5 acre-ft/yr under either map', 'withSubsidy'));
 
 var chgLabel = ui.Label('', {fontSize: '12px', margin: '6px 0 0 0'});
@@ -820,7 +821,9 @@ function buildRanking(body) {
 function buildChecks(body) {
   body.add(small('Computed now from the app\'s tables (Tan) and compared with the report (README.md, docs/GW_SUBSIDY.md).'));
   var irr = fieldsAll.filter(ee.Filter.gt('N_IRR_YRS', 0));
-  var cov = irr.filter(ee.Filter.eq('MA_COVER', 1));
+  // The report's Ma file (wtd_nevada.tif) covered Nevada only; its comparison used the fields that file
+  // covers (MA_NV = 1), not the out-of-state fields this app fills from the other state files.
+  var cov = irr.filter(ee.Filter.eq('MA_NV', 1));
   var sumAll = irr.reduceColumns(ee.Reducer.sum().repeat(4), ['S_RUN_TAN', 'ETA_AF', 'S_R08_TAN', 'S_NEW_TAN']).get('sum');
   var sumCov = cov.reduceColumns(ee.Reducer.sum().repeat(2), ['S_NEW_TAN', 'S_MA_TAN']).get('sum');  // new map, Ma
   var med = cov.reduceColumns(ee.Reducer.median().repeat(2), ['DTW_NEW_M', 'DTW_MA_M']).get('median');
@@ -835,15 +838,16 @@ function buildChecks(body) {
     line('ETa, irrigated field-years', r.a[1], REPORT.etaAll, 0, true);
     line('Tan, run\'s map recomputed', r.a[2], REPORT.subsidyAll, 0, false);
     line('Tan, new DTW, all fields', r.a[3], REPORT.subsidyAll, 0, false);
-    line('Fields covered by both maps', r.n, REPORT.nCovered, 0, false);
-    line('Covered fields, Tan, new DTW', r.c[0], REPORT.coveredNew, 0, false);
-    line('Covered fields, Tan, Ma et al.', r.c[1], REPORT.coveredMa, 0, false);
+    line('Fields the report compared', r.n, REPORT.nCovered, 0, false);
+    line('Those fields, Tan, new DTW', r.c[0], REPORT.coveredNew, 0, false);
+    line('Those fields, Tan, Ma et al.', r.c[1], REPORT.coveredMa, 0, false);
     line('Median field DTW, new (m)', r.md[0], REPORT.medianDtwNew, 1, false);
     line('Median field DTW, Ma (m)', r.md[1], REPORT.medianDtwMa, 1, false);
     body.add(small('The run\'s own values match exactly. The report used the run\'s 2026-10-08 100 m map with Ma et al. ' +
       'on that grid; this app uses the new 30 m map with Ma et al. on the 30 m grid, so the other lines are not expected to ' +
       'match. "Run\'s map recomputed" applies this app\'s inputs to the run\'s map: its gap to the run (+0.75%) is the ' +
-      'recomputation error, mostly growing-season ETo in Lovelock Valley (073), Carson Desert (101) and Marys River (042).'));
+      'recomputation error, mostly growing-season ETo in Lovelock Valley (073), Carson Desert (101) and Marys River (042). ' +
+      '"Fields the report compared" are those the report\'s Ma file (wtd_nevada.tif, Nevada only) covers (MA_NV = 1).'));
   });
 }
 
@@ -863,10 +867,13 @@ function buildNotes(body) {
       'F_RUN_TAN and S_RUN_TAN. The same code with this app\'s inputs on that map totals 34,993 acre-ft/yr against ' +
       'the run\'s 34,733 (+0.75%): the recomputation error. The run\'s ETo export and its copy of the map exist only ' +
       'on the run computer. The uncertainty layer (sigma) is that build\'s; the bucket has none for the 30 m map.',
-    'Ma et al. (2026): 24 m map (wtd_nevada.tif) averaged onto the new map\'s 30 m grid; Nevada only, so fields ' +
-      'outside Nevada have no Ma value (MA_COVER = 0). "Only fields covered by the Ma et al. map" gives the ' +
-      'like-for-like comparison. The report averaged Ma onto the run\'s 100 m grid, which hides narrow shallow ' +
-      'areas and gives much less Tan subsidy (18,563 against 28,630 acre-ft/yr on the 30 m grid).',
+    'Ma et al. (2026): wtd_nevada.tif (24 m) averaged onto the new map\'s 30 m grid. That file covers Nevada ' +
+      'only; elsewhere the dataset\'s other state files (community catalog, projects/sat-io/open-datasets/HRES-WTD), ' +
+      'averaged the same way, fill every pixel the new map has, so every field has a Ma value. MA_NV = 1 marks the ' +
+      'fields wtd_nevada.tif covers, the set the report compared ("Only fields the report compared"). The report ' +
+      'averaged Ma onto the run\'s 100 m grid, which hides narrow shallow areas: on those fields Tan with Ma gives ' +
+      '18,563 acre-ft/yr on that grid against 28,568 on the 30 m grid. On the other 2,814 irrigated fields, almost all outside ' +
+      'Nevada, Ma gives 1,586 acre-ft/yr against 7,536 with the new map. The Ma et al. data are CC BY-NC-ND 4.0.',
     'Training wells: the 9,448 wells the handily NV parity model was trained on ' +
       '(handily_wells_train_nv_parity.csv, dated 2026-10-21): 8,628 NDWR well-log depths and 820 monitoring ' +
       'wells. Distances are from the field boundary (0 = a well inside the field). The new map is within a median ' +

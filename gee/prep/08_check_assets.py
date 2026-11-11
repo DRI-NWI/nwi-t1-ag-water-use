@@ -7,6 +7,8 @@ On Earth Engine, from the assets in projects/<project>/assets/nwi_gw_subsidy/:
      readable by anyone, so the app runs from any Earth Engine account (--no-public skips this);
   2. the report's numbers from the run's own values (S_RUN_TAN, made with the run's 2026-10-08 map):
      Tan subsidy 34,733 acre-ft/yr, ETa, and the HA values of docs/tables/ha_gw_subsidy_new_vs_ma.csv;
+     MA_NV gives the report's comparison set, every field has a Ma et al. value, and dtw_ma_m has
+     values outside Nevada (step 3b);
   3. field-year and HA-year rows add up to the field and HA means (x 41 years);
   4. every map layer and query the app builds (same expressions as nwi_gw_et_explorer_app.js) can be
      drawn or evaluated.
@@ -18,6 +20,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import math
 
 import pandas as pd
@@ -93,6 +96,22 @@ def main():
     d2 = (j["ETa_acre_ft_yr"] - j["ETA_AF"].round(2)).abs().max()
     check("HA subsidy (the run) = docs table", d1 <= 0.0051, f"max |diff| {d1:.3f}")
     check("HA ETa = docs table", d2 <= 0.0051, f"max |diff| {d2:.3f}")
+    # Ma et al.: MA_NV is the report's comparison set; the other state files fill the rest (step 3b)
+    summ = json.loads((out_dir(args.out) / "app" / "app_summary.json").read_text())
+    rs = irr.filter(ee.Filter.eq("MA_NV", 1))
+    got = ee.Dictionary({"n": rs.size(), "s": rs.reduceColumns(ee.Reducer.sum().repeat(2), ["S_NEW_TAN", "S_MA_TAN"]).get("sum"),
+                         "nocover": fields.filter(ee.Filter.neq("MA_COVER", 1)).size()}).getInfo()
+    want = (summ["n_report_set"], summ["report_set_totals"]["S_NEW_TAN"], summ["report_set_totals"]["S_MA_TAN"])
+    check("MA_NV: the report's comparison set, as in app_summary.json",
+          got["n"] == want[0] and abs(got["s"][0] - want[1]) < 0.01 and abs(got["s"][1] - want[2]) < 0.01,
+          f"{got['n']:,} irrigated fields, Tan new {got['s'][0]:,.1f}, Ma {got['s'][1]:,.1f} acre-ft/yr")
+    check("every field has a Ma et al. value (MA_COVER = 1)", got["nocover"] == 0, f"{got['nocover']} without")
+    pts = {"Surprise Valley, CA": (-120.15, 41.55), "Grouse Creek Valley, UT": (-113.88, 41.70)}
+    ma = {k: dtw.select("dtw_ma_m").reduceRegion(ee.Reducer.first(), ee.Geometry.Point(*xy), 30).get("dtw_ma_m")
+          for k, xy in pts.items()}
+    ma = ee.Dictionary(ma).getInfo()
+    check("dtw_ma_m has values outside Nevada", all(v is not None for v in ma.values()),
+          ", ".join(f"{k} {v if v is None else round(v, 2)} m" for k, v in ma.items()))
 
     print("3. Annual rows add up")
     yl = fyears.filter(ee.Filter.eq("NWI_ID", "NV_16742")).reduceColumns(

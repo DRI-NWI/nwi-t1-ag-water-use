@@ -25,11 +25,15 @@ than half of the field as irrigated.
 **Map build and grid.** The handily bucket (`gs://ucrc-wtd/handily/nv/`) now holds only a later
 30 m build of the same model (`handily_dtw_nv_parity_30m.tif`, 2026-10-21), which this run did not
 use. Computed with the run's code on that map, with Ma et al. averaged onto the same 30 m grid
-(`gee/README.md`), the subsidy is 31,746 acre-ft/yr for all fields, 8.6% less than above; on the
-fields both maps cover it is 24,210 acre-ft/yr, close to the 24,184 above. On that common 30 m grid
-Ma et al. gives 28,630 acre-ft/yr, more than the new map: averaging Ma et al. onto 100 m hides narrow
-shallow areas that the steep Tan et al. curve credits most. The "more subsidy with the new map" result
-below therefore holds for the 100 m grid only.
+(`gee/README.md`), the subsidy is 31,746 acre-ft/yr for all fields, 8.6% less than above. On the
+fields compared in the table (16,218 on the 30 m grid) it is 24,210 acre-ft/yr (against 24,184), and
+Ma et al. gives 28,568,
+more than the new map: averaging Ma et al. onto 100 m hides narrow shallow areas that the steep
+Tan et al. curve credits most. The "more subsidy with the new map" result below therefore holds for
+the 100 m grid only. The Ma et al. data used here cover Nevada only, but the map covers the
+conterminous US. Filled from its other state files (Earth Engine community catalog,
+`projects/sat-io/open-datasets/HRES-WTD`), it gives the other 2,814 irrigated fields, almost all
+outside Nevada, 1,586 acre-ft/yr on the 30 m grid, against 7,536 with the new map.
 
 ![Field subsidy](images/fig10_gw_subsidy_fields_new_vs_ma.png)
 
@@ -39,7 +43,7 @@ field's ETa. Compared with Ma et al. on the 100 m grid, the new map gives:
   Owyhee River, Salmon Falls Creek, Goose Creek) and Pahranagat Valley (1,776 vs 1).
 - **Less subsidy** in Lovelock Valley (2,175 vs 7,425), Mason Valley (5 vs 2,532), Carson Desert
   (3,503 vs 4,820) and Carson Valley (1,007 vs 2,084).
-- **Coverage outside Nevada.** The Ma et al. map covers Nevada only, so the out-of-state
+- **Coverage outside Nevada.** The Ma et al. data used here cover Nevada only, so the out-of-state
   fields of Surprise Valley (5,123 acre-ft/yr, the largest HA subsidy), Colorado Valley (2,016
   of its 2,019 acre-ft/yr, on California fields), Grouse Creek Valley, and part of Goose Creek
   (494 of its 1,125 acre-ft/yr, in Idaho and Utah) have a subsidy only with the new map.

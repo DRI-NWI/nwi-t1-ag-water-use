@@ -32,7 +32,7 @@ SUFFIX = RUN_ID.rsplit("_", 1)[-1]                   # 20261018
 STRING_COLS = {"NWI_ID", "STATE", "HYD_AREA", "HA_NAME", "SRC", "CROP_LBL", "TEXTURE", "TEXTURE_MA",
                "WT_NEAR_ID", "WT_NEAR_SRC", "canonical_id", "source", "source_well_id", "confine",
                "well_class", "role", "h_accuracy_class", "confinement_class", "well_use"}
-LONG_COLS = {"YEAR", "IRR", "IRR_SRC", "SRC_ASSUMED", "CROP", "N_IRR_YRS", "MA_COVER", "ROOT_CM", "WT_N1KM",
+LONG_COLS = {"YEAR", "IRR", "IRR_SRC", "SRC_ASSUMED", "CROP", "N_IRR_YRS", "MA_COVER", "MA_NV", "ROOT_CM", "WT_N1KM",
              "WT_N5KM", "N_FIELDS", "N_IRR", "N_SUB_NEW", "N_SUB_MA", "N_SUB_RUN", "N_COVER", "N_FAR5", "obs_count",
              "has_time_series", "is_train", "por_start_year", "por_end_year", "row_id"}
 
@@ -50,7 +50,19 @@ def credentials(project):
 
 
 def git_commit():
-    """Short commit of the repository, read from .git (the git binary is not always callable)."""
+    """Short commit of the repository: "-dirty" when the working tree has uncommitted changes,
+    "-unchecked" when git cannot be run to tell."""
+    commit = _head_commit()
+    try:
+        dirty = subprocess.check_output(["git", "-C", str(REPO), "status", "--porcelain"], text=True,
+                                        stderr=subprocess.DEVNULL).strip()
+    except Exception:
+        return commit + "-unchecked"
+    return commit + ("-dirty" if dirty else "")
+
+
+def _head_commit():
+    """Short commit of HEAD, read from .git (the git binary is not always callable)."""
     try:
         git = REPO / ".git"
         head = (git / "HEAD").read_text().strip()
@@ -122,7 +134,9 @@ def main():
         f"fields_gw_subsidy_{SUFFIX}": ("fields_gw_subsidy.csv", True,
             "One row per field: water-right source, crop, soil, Tan et al. parameters, field DTW (new map, run's map, Ma et al.), "
             "f and GW-ET subsidy (acre-ft/yr, 1985-2025 mean over irrigated field-years) for 4 models with the new map "
-            "(handily 30 m, 2026-10-21) and with Ma et al. on its grid, distance to the DTW training wells. "
+            "(handily 30 m, 2026-10-21) and with Ma et al. on its grid (wtd_nevada.tif in Nevada, the other state files "
+            "elsewhere; MA_NV = 1 where wtd_nevada.tif alone covers the field, the report's comparison set), distance to "
+            "the DTW training wells. "
             "F_RUN_TAN/S_RUN_TAN are the run's values (the report, 2026-10-08 map); *_R08_TAN is Tan recomputed with that map."),
         f"field_year_gw_subsidy_{SUFFIX}": ("field_year_gw_subsidy.csv", False,
             "One row per field-year: IRR (IrrMapper > 50%), ETa and GW-ET subsidy (acre-ft) for 4 models x 2 DTW maps, "
@@ -186,7 +200,8 @@ def main():
                 common,
                 dtw_new_m="new map: handily NV parity DTW, 30 m, gs://ucrc-wtd/handily/nv/handily_dtw_nv_parity_30m.tif "
                           "(2026-10-21, MD5 974338d10a021dcca7e52c70e2c44fba), rewritten with DEFLATE, pixels unchanged",
-                dtw_ma_m="Ma et al. (2026) wtd_nevada.tif averaged (area-weighted) onto the 30 m grid of dtw_new_m",
+                dtw_ma_m="Ma et al. (2026) averaged (area-weighted) onto the 30 m grid of dtw_new_m: wtd_nevada.tif in "
+                         "Nevada, the other state images of projects/sat-io/open-datasets/HRES-WTD elsewhere",
                 dtw_sigma_m="sigma of the run's map: nv_sigma_parity_statewide_100m.tif (2026-10-08 build; the bucket has "
                             "no sigma layer), 100 m",
                 dtw_run_m="the run's map: nv_dtw_parity_statewide_100m.tif (2026-10-08 build, zip MD5 "

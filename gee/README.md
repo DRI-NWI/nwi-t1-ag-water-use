@@ -24,7 +24,7 @@ to the 30 m maps.
 |---|---|
 | f(d) model | Tan et al. (2025), the run's model (default); Banta (2000); Averianov (1956), p = 3; Shah et al. (2007) |
 | Colour fields by | Subsidy change (new − Ma), subsidy with each map (acre-ft/yr or % of ETa), f with each map, field-mean DTW with each map and with the run's map, and their differences, DTW uncertainty (sigma of the run's map), distance to the nearest training well, Tan with the new map − the run, model − Tan |
-| Which fields | Irrigated in at least one year (the report's population, default) or all; Nevada only; only fields covered by the Ma et al. map (like-for-like); only fields with a subsidy > 0.5 acre-ft/yr under either map |
+| Which fields | Irrigated in at least one year (the report's population, default) or all; Nevada only; only the fields the report compared (`MA_NV`: covered by the Nevada Ma file); only fields with a subsidy > 0.5 acre-ft/yr under either map |
 | Large changes only | Shows only fields with \|new − Ma\| at or above the slider value (acre-ft/yr) |
 | No well data | Shows only fields at least the slider value (km) from the nearest training well |
 | Summary line and CSV | Number of fields shown, their subsidy with each map, and a CSV download of those fields (with the run's Tan value) |
@@ -51,7 +51,7 @@ its share inside the field.
 | Tan, the run (`F_RUN_TAN`, `S_RUN_TAN`) | The run's field file (`gw_frac`, `GW_subsidy_acre_ft`), made with its 2026-10-08 100 m map | Exactly: statewide 34,733 acre-ft/yr and every HA in `docs/tables/ha_gw_subsidy_new_vs_ma.csv` |
 | ETa (`ETA_AF`) | The run's field file | Exactly: 1,423,458 acre-ft/yr and every HA |
 | Every model with the new map (`F_NEW_*`, `S_NEW_*`) | The run's code (`scripts/gw_subsidy`) on the bucket's 30 m map | Other map: Tan 31,746 acre-ft/yr |
-| Every model with Ma et al. (`F_MA_*`, `S_MA_*`) | The same, with Ma et al. averaged onto the 30 m grid | Other grid: Tan 28,630 acre-ft/yr against the report's 18,563 on the 100 m grid |
+| Every model with Ma et al. (`F_MA_*`, `S_MA_*`) | The same, with Ma et al. averaged onto the 30 m grid: `wtd_nevada.tif` in Nevada, the dataset's other state files elsewhere (below) | Other grid: on the fields the report compared (`MA_NV` = 1), Tan 28,568 acre-ft/yr against the report's 18,563 on the 100 m grid; 30,154 for all fields |
 | Tan with the run's map, recomputed (`F_R08_TAN`, `S_R08_TAN`) | The run's code with this app's inputs on the run's map | 34,993 against 34,733 (+0.75%): the recomputation error |
 | Distances to wells (`WT_*`, `W_*`) | `gee/prep/05_wells.py` | Not in the report |
 
@@ -63,9 +63,21 @@ the run's map with the field file's ETo and the GeoPackage's polygons, f (Tan) a
 there in the run (about +1 mm/d).
 
 **The grid matters for Ma et al.** The report averaged Ma et al. onto the run's 100 m grid, where Tan with
-Ma totals 18,563 acre-ft/yr. Averaged onto the 30 m grid it totals 28,630: narrow shallow areas survive,
-and Tan's steep curve credits them heavily. On the fields both maps cover, the new map gives 24,210 (the
-run: 24,184), so the comparison changes direction with the grid.
+Ma totals 18,563 acre-ft/yr. Averaged onto the 30 m grid it totals 28,568 on the same fields: narrow
+shallow areas survive, and Tan's steep curve credits them heavily. On those fields the new map gives
+24,210 (the run: 24,184), so the comparison changes direction with the grid.
+
+**Ma et al. outside Nevada.** The report's Ma et al. file, `wtd_nevada.tif`, covers Nevada only, so 2,814
+irrigated fields (2,809 of them in other states) had no Ma value. The Ma et al. (2026) map covers the
+conterminous US, and the dataset's other state files are in the Earth Engine community catalog
+(`projects/sat-io/open-datasets/HRES-WTD`, the same images as `projects/nmose-openet/assets/WTD-US`, which
+the old app used). Step 03b fills every 30 m pixel where the new map has a value and `wtd_nevada.tif` has
+none from the California, Oregon, Idaho, Utah and Arizona files, averaged onto the 30 m grid like
+`wtd_nevada.tif`; Nevada's pixels are unchanged. Taken the same way, the catalog's Nevada image matches
+step 03's average of `wtd_nevada.tif` with r = 0.998 (median difference 0.19 m). Both maps now cover all
+19,032 irrigated fields. On the 2,814 newly covered fields Tan gives 1,586 acre-ft/yr with Ma et al. and
+7,536 with the new map; on all fields, 30,154 and 31,746. `MA_NV` marks the fields `wtd_nevada.tif`
+covers, the set the report compared. The Ma et al. data are licensed CC BY-NC-ND 4.0.
 
 **Making the run's map exact.** Copy the run's `04_gw_subsidy/field_params.parquet`, then rerun steps 6
 and 7 with `--params-run` pointing at it; the `R08` columns then equal the run's. Values on the 30 m maps
@@ -81,7 +93,7 @@ have no run counterpart until the run is redone with the 30 m map.
 | `ha_year_gw_subsidy_20261018` | One row per HA-year, irrigated field-years |
 | `wells_handily_train_nv` | The 9,448 wells the handily NV parity DTW model was trained on (`gs://ucrc-wtd/handily/nv/handily_wells_train_nv_parity.csv`, dated 2026-10-21): 8,628 NDWR well-log depths and 820 monitoring wells, with every map at each well |
 | `wells_gwx_nv` | 137,138 gwx wells with a depth to water (`gwx_nevada_wells.zip`, MD5 `e06c9fe9ea211b438bf2722c523ea459`); `is_train` marks those at a training-well location; the new map and the run's map at each well |
-| `dtw_epsg5070` | `dtw_new_m`: the new map, handily NV parity DTW at 30 m (`gs://ucrc-wtd/handily/nv/handily_dtw_nv_parity_30m.tif`, 2026-10-21, MD5 `974338d10a021dcca7e52c70e2c44fba`), pixels unchanged. `dtw_ma_m`: Ma et al. `wtd_nevada.tif` averaged onto the same 30 m grid. `dtw_run_m`: the run's map, statewide 100 m, 2026-10-08 build (`nv_dtw_parity_statewide_100m.zip`, MD5 `20af7ee2027ac234774f5a026ee9b4d8`), tagged EPSG:5070 with no resampling. `dtw_sigma_m`: the run's map's uncertainty, 100 m (the bucket has no sigma layer) |
+| `dtw_epsg5070` | `dtw_new_m`: the new map, handily NV parity DTW at 30 m (`gs://ucrc-wtd/handily/nv/handily_dtw_nv_parity_30m.tif`, 2026-10-21, MD5 `974338d10a021dcca7e52c70e2c44fba`), pixels unchanged. `dtw_ma_m`: Ma et al. averaged onto the same 30 m grid: `wtd_nevada.tif` in Nevada, the other state images of `projects/sat-io/open-datasets/HRES-WTD` elsewhere (step 03b). `dtw_run_m`: the run's map, statewide 100 m, 2026-10-08 build (`nv_dtw_parity_statewide_100m.zip`, MD5 `20af7ee2027ac234774f5a026ee9b4d8`), tagged EPSG:5070 with no resampling. `dtw_sigma_m`: the run's map's uncertainty, 100 m (the bucket has no sigma layer) |
 
 **Sharing.** All seven assets are readable by anyone (Earth Engine `allUsers`); step 07 sets this.
 The folder is not public, so it cannot be listed, and other assets put in it stay private.
@@ -94,16 +106,17 @@ within a median 1.9 m of these wells and 5.9 m of other gwx wells (the run's 202
 
 | | Irrigated fields | Subsidy, new map | Subsidy, Ma et al. | The run |
 |---|---:|---:|---:|---:|
-| All irrigated fields | 19,032 | 31,746 | 28,630 | 34,733 |
-| > 2 km from a training well | 8,865 | 15,426 | 12,787 | 24,841 |
-| > 5 km from a training well | 5,340 | 10,262 | 5,177 | 18,978 |
-| > 10 km from a training well | 3,376 | 7,218 | 2,323 | 13,221 |
+| All irrigated fields | 19,032 | 31,746 | 30,154 | 34,733 |
+| > 2 km from a training well | 8,865 | 15,426 | 13,088 | 24,841 |
+| > 5 km from a training well | 5,340 | 10,262 | 5,459 | 18,978 |
+| > 10 km from a training well | 3,376 | 7,218 | 2,523 | 13,221 |
 
 A third of the new map's subsidy is on fields more than 5 km from any training well (55% with the run's
 map). The largest decreases against Ma et al. are in Lovelock and Mason valleys, about 1–2 km from training
-wells. The largest increases are in Surprise, Colorado and Grouse Creek valleys, whose fields are outside
-Nevada, where Ma et al. has no value, and in Carson Valley, which the report had as a decrease.
-979 irrigated fields change by at least 10 acre-ft/yr; 317 of them are more than 5 km from a training well.
+wells. The largest increases are in Surprise Valley, Carson Valley (which the report had as a decrease),
+Grouse Creek Valley and the Owyhee River area. The Surprise and Grouse Creek fields are outside Nevada,
+where Ma et al. puts the water table much deeper (acre-weighted 11.5 and 8.4 m, against 4.0 and 2.7 m).
+968 irrigated fields change by at least 10 acre-ft/yr; 314 of them are more than 5 km from a training well.
 
 ## Rebuilding
 
@@ -118,6 +131,7 @@ python 01_field_results.py --field-file <run>/05_field_summaries/field_summaries
 python 02_field_geometries.py --gpkg "<OneDrive>/RESERVOIR - GIS/nevada_agricultural_field_boundaries_20260820.gpkg" --out $OUT
 python 03_dtw_rasters.py --new-tif handily_dtw_nv_parity_30m.tif --dtw-dir <unzipped nv_dtw_parity_statewide_100m.zip> \
     --ma-tif <nwi-gw-subsidy>/Data/Inputs/wtd_nevada.tif --out $OUT
+python 03b_ma_other_states.py --ee-project nwi-usgs --out $OUT
 python 04_field_fractions.py --ee-project nwi-usgs --out $OUT
 python 05_wells.py --train handily_wells_train_nv_parity.csv --gwx gwx_nevada/wells.geoparquet --out $OUT
 python 06_app_tables.py --out $OUT [--params-run <run>/04_gw_subsidy/field_params.parquet]
@@ -131,9 +145,10 @@ python 08_check_assets.py --project nwi-usgs --out $OUT
 |---|---|---|
 | 01 | Field-month, field-year and field tables from the run's whole-field file | One f per field; subsidy = min(f × ETa, max(NetET_pre, 0)) in every field-month; README totals; every HA of the docs table |
 | 02 | The 2026-08-20 polygons from the GeoPackage, one per `NWI_ID` | Same 29,338 IDs as the run; the GeoPackage's MD5 recorded in `02_field_geometries_checks.json` |
-| 03 | The new 30 m map rewritten with DEFLATE (pixels unchanged); the run's 100 m map and sigma tagged EPSG:5070; Ma et al. averaged onto the 30 m grid | The 30 m and 100 m grids share a corner |
+| 03 | The new 30 m map rewritten with DEFLATE (pixels unchanged); the run's 100 m map and sigma tagged EPSG:5070; Ma et al. (`wtd_nevada.tif`) averaged onto the 30 m grid | The 30 m and 100 m grids share a corner |
+| 03b | Ma et al. outside Nevada: the other state images of `projects/sat-io/open-datasets/HRES-WTD`, downloaded on their own grids and averaged onto the 30 m grid like `wtd_nevada.tif`, fill the pixels where the new map has a value and `wtd_nevada.tif` has none | Nevada's catalog image through the same route against step 03's average, and the pixels left without a value, recorded in `03b_ma_other_states_checks.json` |
 | 04 | f for 4 models with the new map and with Ma et al., and Tan with the run's map, with the run's `scripts/gw_subsidy` code (POLARIS texture through Earth Engine) | f (Tan, run's map) against the run's `gw_frac`, and the totals against the report, recorded in `04_field_fractions_checks.json` |
 | 05 | Training wells, gwx wells, every map at each well, distances from every field | Map-minus-well depth at training and other wells, for the new map and the run's |
 | 06 | The app's tables | The run's f gives the run's subsidy in every field-month; statewide and HA totals equal the report; the 30 m numbers against the report recorded in `app/app_summary.json` |
 | 07 | Upload to Cloud Storage and ingestion as Earth Engine assets, which are then made public (`--no-public` skips this) | Explicit column types (HA codes stay text); provenance stored as asset properties |
-| 08 | Checks the uploaded assets on Earth Engine | Types survived ingestion; every asset is public (`--no-public` skips this); the new map is EPSG:5070 at 30 m; the report's statewide and HA numbers from the run's values; annual rows add up; every app layer draws and every click query, ranking and CSV link runs |
+| 08 | Checks the uploaded assets on Earth Engine | Types survived ingestion; every asset is public (`--no-public` skips this); the new map is EPSG:5070 at 30 m; the report's statewide and HA numbers from the run's values; `MA_NV` gives the report's comparison set and every field has a Ma et al. value; annual rows add up; every app layer draws and every click query, ranking and CSV link runs |

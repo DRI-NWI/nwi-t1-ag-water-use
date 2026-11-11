@@ -15,9 +15,10 @@ EPSG:5070 tag; no resampling. Both grids start at the same corner.
 
 Ma et al. (2026): wtd_nevada.tif (the 24 m ParFlow-CONUS2 grid used by nwi-gw-subsidy) averaged onto
 the new map's 30 m grid (area-weighted mean), so both maps go through the same steps on the same grid,
-as in the report's comparison (which used the 100 m grid of the run's map).
+as in the report's comparison (which used the 100 m grid of the run's map). The file covers Nevada
+only; step 3b fills the rest of the new map's area from the dataset's other state files.
 
-Outputs (under --out/rasters): dtw_new_30m_epsg5070.tif, dtw_ma_30m_epsg5070.tif,
+Outputs (under --out/rasters): dtw_new_30m_epsg5070.tif, dtw_ma_nv_30m_epsg5070.tif,
 dtw_run_100m_epsg5070.tif, dtw_sigma_100m_epsg5070.tif. Nodata -9999, float32, tiled, deflate.
 
 Usage:
@@ -89,7 +90,7 @@ def main():
     grid_s = tag_5070(args.dtw_dir / "nv_sigma_parity_statewide_100m.tif", rdir / "dtw_sigma_100m_epsg5070.tif", 100)
     assert grid_run == grid_s, "sigma grid differs from the run's DTW grid"
     assert (grid[2].c, grid[2].f) == (grid_run[2].c, grid_run[2].f), "the 30 m and 100 m grids should share a corner"
-    warp_to_grid(args.ma_tif, rdir / "dtw_ma_30m_epsg5070.tif", grid, args.ma_method)
+    warp_to_grid(args.ma_tif, rdir / "dtw_ma_nv_30m_epsg5070.tif", grid, args.ma_method)
 
 
 if __name__ == "__main__":

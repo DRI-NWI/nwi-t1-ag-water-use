@@ -13,7 +13,9 @@ Builds, from steps 1-5 (under --out/app):
 
 f per field (F_<MAP>_<MODEL>; MODEL = TAN, BANTA, AVER, SHAH), all from step 4 with the run's own code:
   * NEW: the new DTW map, handily NV parity at 30 m (gs://ucrc-wtd/handily/nv/, 2026-10-21).
-  * MA: Ma et al. (2026) on the same 30 m grid.
+  * MA: Ma et al. (2026) on the same 30 m grid (wtd_nevada.tif in Nevada, the other state files elsewhere).
+    MA_COVER = 1 when the field has a Ma value; MA_NV = 1 when wtd_nevada.tif alone covers it, the set the
+    report compared (its Ma file covered Nevada only).
   * RUN (Tan only): gw_frac from the run's field file, made with the run's 2026-10-08 100 m map. These
     are the values in the report.
   * R08 (Tan only): Tan recomputed by step 4 with the run's map. R08 - RUN is the recomputation error
@@ -95,7 +97,8 @@ def main():
     fx = json.loads((out / "04_field_fractions_checks.json").read_text())
     summary = {"dtw_new": "handily_dtw_nv_parity_30m.tif (gs://ucrc-wtd/handily/nv/, 2026-10-21)",
                "dtw_run": "nv_dtw_parity_statewide_100m.tif (2026-10-08 build, the run's map)",
-               "dtw_ma": "Ma et al. (2026) wtd_nevada.tif averaged onto the new map's 30 m grid",
+               "dtw_ma": "Ma et al. (2026) averaged onto the new map's 30 m grid: wtd_nevada.tif in Nevada, the other "
+                         "state files (projects/sat-io/open-datasets/HRES-WTD) elsewhere",
                "step4": fx, "params_new": str(args.params_new or out / "field_params_new.parquet"),
                "params_ma": str(args.params_ma or out / "field_params_ma.parquet"),
                "params_run": str(args.params_run or out / "field_params_run.parquet"), "vs_report": {}}
@@ -106,6 +109,7 @@ def main():
     pm = pd.read_parquet(summary["params_ma"]).set_index("OPENET_ID")
     pr = pd.read_parquet(summary["params_run"]).set_index("OPENET_ID")
     wl = pd.read_parquet(out / "field_wells.parquet").set_index("NWI_ID")
+    nvc = pd.read_parquet(out / "field_ma_nv_cover.parquet").set_index("OPENET_ID")["ma_nv_px"]   # step 4
     ids = st.index.sort_values()
 
     f = {("RUN", "TAN"): st["gw_frac"].reindex(ids),                     # the run's f (the report)
@@ -171,6 +175,9 @@ def main():
         fld[col] = pr[src].reindex(ids)
     fld["DTW_D_M"] = fld["DTW_NEW_M"] - fld["DTW_MA_M"]
     fld["MA_COVER"] = fld["DTW_MA_M"].notna().astype(int)
+    # Covered by wtd_nevada.tif alone, as in the report's comparison; MA_COVER also counts the other
+    # states' files (step 3b).
+    fld["MA_NV"] = (nvc.reindex(ids).fillna(0.0) > 0).astype(int)
     fld["ETA_AF"] = field_mean("ETA_AF")
     for (mp, k), fv in f.items():
         fld[f"F_{mp}_{k}"] = fv.to_numpy()
@@ -196,14 +203,16 @@ def main():
     dma = (j["subsidy_ma_acre_ft_yr"] - j["S_MA_TAN"])
     summary["ha_ma_subsidy_app_minus_report"] = dma.round(2).sort_values(key=abs, ascending=False).head(15).to_dict()
 
-    both = fld[irr_f & (fld["MA_COVER"] == 1)]
-    summary["vs_report"]["n_covered"] = {"app": len(both), "report": REPORT["n_covered"]}
-    print(f"  [info] irrigated fields covered by both maps: app {len(both):,} vs report {REPORT['n_covered']:,}")
-    note(summary, "covered fields, Tan, new DTW (acre-ft/yr)", float(both["S_NEW_TAN"].sum()), REPORT["covered_new"])
-    note(summary, "covered fields, Tan, Ma (acre-ft/yr)", float(both["S_MA_TAN"].sum()), REPORT["covered_ma"])
-    note(summary, "median field DTW, new (m)", float(both["DTW_NEW_M"].median()), REPORT["median_dtw_new_fig11"])
-    note(summary, "median field DTW, Ma (m)", float(both["DTW_MA_M"].median()), REPORT["median_dtw_ma_fig11"])
-    r = float(np.corrcoef(np.log(both["DTW_MA_M"].clip(0.1)), np.log(both["DTW_NEW_M"].clip(0.1)))[0, 1])
+    both = fld[irr_f & (fld["MA_COVER"] == 1)]     # irrigated fields both 30 m maps cover
+    rpt = both[both["MA_NV"] == 1]                  # ... that wtd_nevada.tif alone covers: the report's comparison set
+    summary["vs_report"]["n_covered"] = {"app": len(rpt), "report": REPORT["n_covered"]}
+    print(f"  [info] irrigated fields wtd_nevada.tif covers (the report's comparison): app {len(rpt):,} vs report "
+          f"{REPORT['n_covered']:,}; with the other states' files, both maps cover {len(both):,}")
+    note(summary, "covered fields, Tan, new DTW (acre-ft/yr)", float(rpt["S_NEW_TAN"].sum()), REPORT["covered_new"])
+    note(summary, "covered fields, Tan, Ma (acre-ft/yr)", float(rpt["S_MA_TAN"].sum()), REPORT["covered_ma"])
+    note(summary, "median field DTW, new (m)", float(rpt["DTW_NEW_M"].median()), REPORT["median_dtw_new_fig11"])
+    note(summary, "median field DTW, Ma (m)", float(rpt["DTW_MA_M"].median()), REPORT["median_dtw_ma_fig11"])
+    r = float(np.corrcoef(np.log(rpt["DTW_MA_M"].clip(0.1)), np.log(rpt["DTW_NEW_M"].clip(0.1)))[0, 1])
     note(summary, "r(log field DTW)", r, REPORT["r_log"])
     note(summary, "Ma, Tan, all fields (acre-ft/yr)", float(fld["S_MA_TAN"].sum()), float(ref["subsidy_ma_acre_ft_yr"].sum()))
     note(summary, "Tan, new map, all fields (acre-ft/yr)", float(fld["S_NEW_TAN"].sum()), REPORT["subsidy_total"])
@@ -211,11 +220,13 @@ def main():
          REPORT["subsidy_total"])
     dfr = (fld["F_R08_TAN"] - fld["F_RUN_TAN"]).abs()
     summary["r08_f_abs_diff_quantiles"] = dfr[fld["F_RUN_TAN"] > 0].quantile([0.5, 0.9, 0.99, 1.0]).to_dict()
-    cov = both.assign(w=both["ACRES"])     # figures/_mapkit.field_attributes: Acres = ACRES_FTR_GEOM
-    hw = cov.groupby("HYD_AREA").apply(lambda g: pd.Series({
-        "DTW_NEW_M": np.average(g["DTW_NEW_M"], weights=g["w"]),
-        "DTW_MA_M": np.average(g["DTW_MA_M"], weights=g["w"])}), include_groups=False)
-    j = ref.join(hw.round(2), how="left")
+    def acre_weighted(d):                  # figures/_mapkit.field_attributes: Acres = ACRES_FTR_GEOM
+        d = d.assign(w=d["ACRES"])
+        return d.groupby("HYD_AREA").apply(lambda g: pd.Series({
+            "DTW_NEW_M": np.average(g["DTW_NEW_M"], weights=g["w"]),
+            "DTW_MA_M": np.average(g["DTW_MA_M"], weights=g["w"])}), include_groups=False)
+    hw = acre_weighted(both)               # the HA table: every field both maps cover
+    j = ref.join(acre_weighted(rpt).round(2), how="left")
     summary["ha_dtw_new_max_abs_diff_m"] = float((j["dtw_new_m"] - j["DTW_NEW_M"]).abs().max())
     summary["ha_dtw_ma_max_abs_diff_m"] = float((j["dtw_ma_m"] - j["DTW_MA_M"]).abs().max())
 
@@ -279,7 +290,9 @@ def main():
                     "subsidy_new_tan_total": float(fld["S_NEW_TAN"].sum()),
                     "eta_total": eta_tot,
                     "totals": {c: float(fld[c].sum()) for c in fld.columns if c.startswith(("S_", "D_"))},
-                    "covered_totals": {c: float(both[c].sum()) for c in both.columns if c.startswith(("S_", "D_"))}})
+                    "covered_totals": {c: float(both[c].sum()) for c in both.columns if c.startswith(("S_", "D_"))},
+                    "n_covered": len(both), "n_report_set": len(rpt),
+                    "report_set_totals": {c: float(rpt[c].sum()) for c in rpt.columns if c.startswith(("S_", "D_"))}})
     (app / "app_summary.json").write_text(json.dumps(summary, indent=2, default=float))
     print(f"Wrote app tables to {app}")
     print(json.dumps({k: round(v, 1) for k, v in summary["totals"].items()}, indent=1))

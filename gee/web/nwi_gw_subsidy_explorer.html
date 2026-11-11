@@ -161,7 +161,7 @@ details > div { margin-top: 8px; }
           <select id="pop"><option value="irr">Irrigated in at least one year (report)</option><option value="all">All fields</option></select></div>
         <div class="checks">
           <label class="check"><input type="checkbox" id="nv"> Nevada fields only</label>
-          <label class="check"><input type="checkbox" id="cov"> Only fields the Ma et al. map covers (like-for-like)</label>
+          <label class="check"><input type="checkbox" id="cov"> Only fields the report compared (Nevada Ma file)</label>
           <label class="check"><input type="checkbox" id="sub"> Only fields with a subsidy over 0.5 acre-ft/yr under either map</label>
         </div>
         <div class="slider"><div class="sv"><label for="chg">Large changes only, |new − Ma| at least</label><b id="chgv">off</b></div>
@@ -412,7 +412,7 @@ function applyFilters() {
   for (var i = 0; i < N; i++) {
     if (S.pop === 'irr' && col.ni[i] === 0) continue;
     if (S.nv && col.st[i] !== nvCode) continue;
-    if (S.cov && col.mc[i] !== 1) continue;
+    if (S.cov && col.mn[i] !== 1) continue;
     if (S.sub && !(snm[i] > 0.5 || smm[i] > 0.5)) continue;
     if (S.minChg > 0 && Math.abs(snm[i] - smm[i]) < S.minChg) continue;
     if (S.minKm > 0 && !(col.wt[i] >= S.minKm)) continue;
@@ -786,7 +786,7 @@ function selectField(i, zoom) {
     ['Soil, roots', tex + '; roots ' + col.rc[i] + ' cm; ETo ' + fmt(col.e0[i], 2) + ' mm/d'],
     ['Tan parameters', 'd_dec ' + fmt(col.dd[i], 2) + ' m, d_ext ' + fmt(col.de[i], 2) + ' m, p ' + fmt(col.p[i], 2)],
     ['Depth, new', fmt(col.dn[i], 2) + ' m mean, ' + fmt(col.dnm[i], 2) + ' m min (30 m map)'],
-    ['Depth, Ma', col.mc[i] ? fmt(col.dm[i], 2) + ' m mean, ' + fmt(col.dmm[i], 2) + ' m min' : 'outside the Ma et al. map (Nevada only)'],
+    ['Depth, Ma', col.mc[i] ? fmt(col.dm[i], 2) + ' m mean, ' + fmt(col.dmm[i], 2) + ' m min' : 'no Ma et al. value'],
     ['Depth, run\'s map', fmt(col.dr[i], 2) + ' m mean, ' + fmt(col.drm[i], 2) + ' m min; sigma ' + fmt(col.sg[i], 1) + ' m'],
     ['Training wells', fmt(col.wt[i], 2) + ' km to the nearest (' + (col.wsrc[i] === 1 ? 'NDWR well log' : 'monitoring well') + ', ' + fmt(col.wdtw[i], 1) +
       ' m to water); ' + col.wn1[i] + ' within 1 km, ' + col.wn5[i] + ' within 5 km'],
@@ -1027,7 +1027,7 @@ function renderChecks() {
   for (var i = 0; i < N; i++) {
     if (!col.ni[i]) continue;
     sRun += col.sr[i]; eAll += col.eta[i]; s08 += col.s08[i]; sNew += col.sn_TAN[i];
-    if (col.mc[i]) { cN += col.sn_TAN[i]; cM += col.sm_TAN[i]; dN.push(col.dn[i]); dM.push(col.dm[i]); }
+    if (col.mn[i]) { cN += col.sn_TAN[i]; cM += col.sm_TAN[i]; dN.push(col.dn[i]); dM.push(col.dm[i]); }   // the report's comparison set
   }
   var lx = dN.map(function (v) { return Math.log(Math.max(v, 0.1)); }), ly = dM.map(function (v) { return Math.log(Math.max(v, 0.1)); });
   var r = corr(lx, ly);
@@ -1036,9 +1036,9 @@ function renderChecks() {
     ['ETa, irrigated field-years', eAll, REPORT.etaAll, 0, true],
     ['Tan, run\'s map recomputed', s08, REPORT.subsidyAll, 0, false],
     ['Tan, new DTW, all fields', sNew, REPORT.subsidyAll, 0, false],
-    ['Fields both maps cover', dN.length, REPORT.nCovered, 0, false],
-    ['Covered fields, Tan, new', cN, REPORT.coveredNew, 0, false],
-    ['Covered fields, Tan, Ma', cM, REPORT.coveredMa, 0, false],
+    ['Fields the report compared', dN.length, REPORT.nCovered, 0, false],
+    ['Those fields, Tan, new', cN, REPORT.coveredNew, 0, false],
+    ['Those fields, Tan, Ma', cM, REPORT.coveredMa, 0, false],
     ['Median field depth, new (m)', median(dN), REPORT.medianNew, 1, false],
     ['Median field depth, Ma (m)', median(dM), REPORT.medianMa, 1, false],
     ['r, log field depths', r, REPORT.rLog, 2, false]
@@ -1060,6 +1060,7 @@ function renderChecks() {
   b.appendChild(el('p', { class: 'note', style: 'margin-top:8px' }, 'The run\'s own values match the report exactly. The report used the run\'s 2026-10-08 100 m map with Ma et al. on that grid; ' +
     'this page uses the new 30 m map with Ma et al. on the 30 m grid, so the other lines are not expected to match. "Run\'s map recomputed" is this page\'s inputs on the run\'s map: ' +
     'its gap to the run (+0.75%) is the recomputation error, mostly growing-season ETo in Lovelock Valley (073), Carson Desert (101) and Marys River (042). ' +
+    '"Fields the report compared" are those the report\'s Ma file (wtd_nevada.tif, Nevada only) covers. ' +
     'Fig. 11 and docs/GW_SUBSIDY.md give the report\'s medians as new 7.2 m, Ma 7.4 m.'));
 }
 function corr(a, b) {
@@ -1074,7 +1075,7 @@ function renderNotes() {
     'f is the fraction of ETa groundwater can supply. Tan et al. (2025) parameters (d_dec, d_ext, p) come from the field\'s POLARIS texture (0–100 cm), rooting depth (200 cm for alfalfa, orchards, vineyards, forest, shrubland and wetlands; 100 cm otherwise) and April–October ETo. Banta (d_dec = 0, p = 1), Averianov (d_dec = 0, p = 3) and Shah (exponential, f = 0.02 at d_ext) use the same d_ext.',
     'New DTW: the handily NV parity map at 30 m, gs://ucrc-wtd/handily/nv/handily_dtw_nv_parity_30m.tif (2026-10-21). Every value with it, and with Ma et al., is computed with the run\'s code (scripts/gw_subsidy) on the same 2026-08-20 fields. Field f is the coverage-weighted mean of f over the 30 m pixels touching the field; fields with no pixel shallower than 16 m have f = 0.',
     'The run (the report) used the 2026-10-08 statewide 100 m build of the same model. Its own Tan values are shown as "the run" and reproduce README.md and docs/tables/ha_gw_subsidy_new_vs_ma.csv exactly. The same code with this page\'s inputs on that map totals ' + fmt(META.summary.totals.S_R08_TAN) + ' acre-ft/yr against the run\'s 34,733 (+0.75%): the recomputation error. The uncertainty (sigma) is that build\'s; the bucket has none for the 30 m map.',
-    'Ma et al. (2026) is averaged from its 24 m grid onto the new map\'s 30 m grid and covers Nevada only, so fields outside Nevada have no Ma value. Use "Only fields the Ma et al. map covers" for like-for-like totals. The report averaged Ma onto the run\'s 100 m grid, which hides narrow shallow areas: its Ma total is 18,563 acre-ft/yr against ' + fmt(META.summary.totals.S_MA_TAN) + ' on the 30 m grid.',
+    'Ma et al. (2026) is wtd_nevada.tif averaged from its 24 m grid onto the new map\'s 30 m grid. That file covers Nevada only; elsewhere the dataset\'s other state files (Earth Engine community catalog, projects/sat-io/open-datasets/HRES-WTD), averaged the same way, fill every pixel the new map has, so every field has a Ma value. "Only fields the report compared" keeps the ' + fmt(META.summary.n_report_set) + ' irrigated fields wtd_nevada.tif covers, the set the report compared. The report averaged Ma onto the run\'s 100 m grid, which hides narrow shallow areas: on those fields Tan with Ma gives 18,563 acre-ft/yr on that grid against ' + fmt(META.summary.report_set_totals.S_MA_TAN) + ' on the 30 m grid. The Ma et al. data are licensed CC BY-NC-ND 4.0.',
     'Training wells are the 9,448 wells the handily NV parity model was fitted to (handily_wells_train_nv_parity.csv): 8,628 NDWR well-log depths and 820 monitoring wells. Distances run from the field boundary; 0 means a well inside the field. The new map is within a median 1.9 m of them and 5.9 m of other wells (the run\'s map: 1.8 and 6.0 m).',
     'Fields are drawn with their boundaries from ' + META.geom.source + ' (data last changed ' + META.geom.last_change + '), simplified by up to ' + META.geom.simplify_m + ' m on a ' + META.geom.grid_m + ' m grid, so every outline drawn is within ' + fmt(META.geom.max_error_m, 1) + ' m of the file\'s. Fields narrower than ' + POLY_PX + ' pixels on screen are drawn as squares of their area so they stay visible. Hydrographic areas are ' + META.geom.ha_source + ', within ' + fmt(META.geom.ha_max_error_m, 1) + ' m. The DTW rasters and f for every pixel are in the Earth Engine app (gee/nwi_gw_et_explorer_app.js on branch gw-subsidy-assessments).'
   ].forEach(function (t) { n.appendChild(el('p', null, t)); });
@@ -1091,7 +1092,7 @@ function init(meta, fields, has, wells, hy, geom, hgeom) {
   META = meta; F = fields; H = has; W = wells; HY = hy; N = F.id.length; G = geom; HG = hgeom;
   if (G.n !== N) throw new Error('fields_geom.bin has ' + G.n + ' fields and fields.json ' + N);
   if (HG.n !== H.code.length) throw new Error('has_geom.bin has ' + HG.n + ' areas and has.json ' + H.code.length);
-  ['st', 'ha', 'src', 'as', 'crop', 'ni', 'tx', 'txm', 'rc', 'mc', 'wn1', 'wn5', 'wsrc'].forEach(function (k) { col[k] = Int32Array.from(F[k]); });
+  ['st', 'ha', 'src', 'as', 'crop', 'ni', 'tx', 'txm', 'rc', 'mc', 'mn', 'wn1', 'wn5', 'wsrc'].forEach(function (k) { col[k] = Int32Array.from(F[k]); });
   ['ac', 'e0', 'dd', 'de', 'p', 'ddm', 'dem', 'pm', 'dn', 'dnm', 'sg', 'dm', 'dmm', 'dr', 'drm', 'eta', 'wt', 'wdtw', 'wa', 'wts', 'fr', 'sr', 'f08', 's08'].forEach(function (k) {
     col[k] = Float64Array.from(F[k].map(function (v) { return v === null ? NaN : v; }));
   });

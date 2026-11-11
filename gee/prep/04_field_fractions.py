@@ -19,12 +19,14 @@ A. The run's map (2026-10-08, 100 m), with texture as the run had it (only field
    map sampled; the rest take the loam fallback): f (Tan) is compared with gw_frac in the run's field
    file for every field. This measures how close the recomputation comes to the run.
 B. The new map (handily 30 m, 2026-10-21, step 3), every model.
-C. Ma et al. on the new map's 30 m grid, every model.
+C. Ma et al. on the new map's 30 m grid (wtd_nevada.tif in Nevada, the dataset's other state files
+   elsewhere: steps 3 and 3b), every model.
 B and C use each field's own POLARIS texture. Their HA totals are compared with the report's table
 (docs/tables/ha_gw_subsidy_new_vs_ma.csv) for the record only: the report used the run's map.
 
 Outputs (under --out): field_params_run.parquet, field_params_new.parquet, field_params_ma.parquet,
-field_texture.csv, field_dtw_sigma.parquet, 04_field_fractions_checks.json.
+field_texture.csv, field_dtw_sigma.parquet, field_ma_nv_cover.parquet (which fields wtd_nevada.tif alone
+covers: the report's comparison set), 04_field_fractions_checks.json.
 
 Usage:
     python 04_field_fractions.py [--ee-project nwi-usgs] [--out DIR]
@@ -115,6 +117,23 @@ def sigma_by_field(inp, sigma_tif, out):
     g = inp.fields_in_crs(_raster_crs(sigma_tif))
     res = exact_extract(str(sigma_tif), g, ["mean"], include_cols=["OPENET_ID"], output="pandas")
     s = res.rename(columns={"mean": "dtw_sigma_mean_m"})[["OPENET_ID", "dtw_sigma_mean_m"]]
+    s.to_parquet(path, index=False)
+    return s
+
+
+def ma_nv_cover(inp, nv_tif, out):
+    """Coverage of each field by wtd_nevada.tif alone (step 3, before step 3b fills the other states).
+
+    The report compared the maps on the fields this file covers; ma_nv_px is the number of its valid
+    30 m pixels in the field, each weighted by its share inside the field (0 = not covered). Cached.
+    """
+    path = out / "field_ma_nv_cover.parquet"
+    if path.exists():
+        return pd.read_parquet(path)
+    from exactextract import exact_extract
+    g = inp.fields_in_crs(_raster_crs(nv_tif))
+    res = exact_extract(str(nv_tif), g, ["count"], include_cols=["OPENET_ID"], output="pandas")
+    s = res.rename(columns={"count": "ma_nv_px"})[["OPENET_ID", "ma_nv_px"]]
     s.to_parquet(path, index=False)
     return s
 
@@ -212,6 +231,8 @@ def main():
     checks = {}
 
     sigma = sigma_by_field(inp, rdir / "dtw_sigma_100m_epsg5070.tif", out)
+    nv = ma_nv_cover(inp, rdir / "dtw_ma_nv_30m_epsg5070.tif", out)
+    checks["n_fields_covered_by_wtd_nevada"] = int((nv["ma_nv_px"] > 0).sum())
 
     # ---- zonal statistics for every raster ---------------------------------------------------
     rasters = {"run": rdir / "dtw_run_100m_epsg5070.tif",      # the run's map: 2026-10-08, 100 m

@@ -5,8 +5,9 @@
 Writes compact JSON (one array per column) into <data dir>. Run build_outlines.py next: it adds the field
 and HA outlines, removes the HA placeholder written here, and records the outlines' provenance in meta.json.
 
-NEW = the new DTW map (handily 30 m, 2026-10-21); MA = Ma et al. on the same grid; RUN = the run's own
-Tan values (its 2026-10-08 map; the report); R08 = Tan recomputed with the run's map.
+NEW = the new DTW map (handily 30 m, 2026-10-21); MA = Ma et al. on the same grid (wtd_nevada.tif in Nevada,
+the other state files elsewhere; mn = 1 where wtd_nevada.tif covers the field, the report's comparison set);
+RUN = the run's own Tan values (its 2026-10-08 map; the report); R08 = Tan recomputed with the run's map.
 """
 import argparse
 import json
@@ -52,7 +53,7 @@ cols = {
     'dd': r(f.DDEC_M, 3), 'de': r(f.DEXT_M, 3), 'p': r(f.P, 2), 'ddm': r(f.DDEC_MA_M, 3), 'dem': r(f.DEXT_MA_M, 3), 'pm': r(f.P_MA, 2),
     'dn': r(f.DTW_NEW_M, 2), 'dnm': r(f.DTW_NEW_MIN_M, 2), 'sg': r(f.DTW_SIG_M, 1), 'dm': r(f.DTW_MA_M, 2), 'dmm': r(f.DTW_MA_MIN_M, 2),
     'dr': r(f.DTW_RUN_M, 2), 'drm': r(f.DTW_RUN_MIN_M, 2),
-    'mc': f.MA_COVER.astype(int).tolist(), 'eta': r(f.ETA_AF, 2),
+    'mc': f.MA_COVER.astype(int).tolist(), 'mn': f.MA_NV.astype(int).tolist(), 'eta': r(f.ETA_AF, 2),
     'wt': r(f.WT_DIST_KM, 2), 'wn1': f.WT_N1KM.astype(int).tolist(), 'wn5': f.WT_N5KM.astype(int).tolist(),
     'wsrc': [1 if s == 'nv_ndwr' else 2 for s in f.WT_NEAR_SRC], 'wdtw': r(f.WT_NEAR_DTW_M, 1),
     'wa': r(f.W_DIST_KM, 2), 'wts': r(f.W_TS_DIST_KM, 2),
@@ -104,7 +105,8 @@ summary = json.loads((SRC / 'app_summary.json').read_text())
 meta = {'crops': crop_u, 'textures': tex_u, 'states': st_u, 'n_fields': len(f), 'models': MODELS,
         'bounds_km': [round(v / 1000, 1) for v in f.total_bounds],
         'summary': {k: summary[k] for k in ('dtw_new', 'dtw_run', 'dtw_ma', 'totals', 'covered_totals', 'vs_report',
-                                            'n_fields', 'n_fields_irrigated')}}
+                                            'n_fields', 'n_fields_irrigated', 'n_covered', 'n_report_set',
+                                            'report_set_totals')}}
 # HA outlines are written by build_outlines.py (has_geom.json); keep an empty placeholder until then
 ha['rings'] = []
 for name, obj in (('fields', cols), ('has', ha), ('ha_years', hys), ('field_years', fys), ('wells', wells), ('meta', meta)):
