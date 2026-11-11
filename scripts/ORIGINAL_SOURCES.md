@@ -1,8 +1,8 @@
 # Original sources of the copied scripts
 
 The scripts in this folder were first committed unchanged, as copied from the files below
-(commit 9b60d5d). Every later change is marked `# NWI T1:` in the code, and
-`git diff 9b60d5d -- scripts/` shows each edit.
+(commit 0dde9ab). Every later change is marked `# NWI T1:` in the code, and
+`git diff 0dde9ab -- scripts/` shows each edit.
 
 | File here | Copied from | Version |
 |---|---|---|

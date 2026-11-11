@@ -79,7 +79,7 @@ hb = ax.hexbin(both.wtd_ma_m.clip(0.1, 300), both.wtd_mean_m.clip(0.1, 300), gri
 ax.plot([0.1, 300], [0.1, 300], "w-", lw=1)
 r = np.corrcoef(np.log(both.wtd_ma_m.clip(0.1)), np.log(both.wtd_mean_m.clip(0.1)))[0, 1]
 ax.set_xlabel("Ma et al. DTW (m)"); ax.set_ylabel("New DTW (m)")
-ax.set_title(f"Field mean DTW (n = {len(both):,})\nmedian {both.wtd_ma_m.median():.1f} vs {both.wtd_mean_m.median():.1f} m, r(log) = {r:.2f}")
+ax.set_title(f"Field mean DTW (n = {len(both):,})\nmedian new {both.wtd_mean_m.median():.1f} m, Ma {both.wtd_ma_m.median():.1f} m; r(log) = {r:.2f}")
 ax = fig.add_subplot(gs[1, 0])
 bins = np.logspace(-1, np.log10(300), 50)
 ax.hist(both.wtd_ma_m.clip(0.1, 300), bins, alpha=0.6, label="Ma et al.", color="#999999")

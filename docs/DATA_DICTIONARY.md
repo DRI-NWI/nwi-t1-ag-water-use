@@ -86,7 +86,7 @@ field-months have no observed ETa to fill from (`unfilled_missing`) and stay mis
 
 | Column | Unit | Description |
 |---|---|---|
-| `gw_frac` | fraction | f: fraction of the field's ETa that groundwater can supply (Tan et al. 2025), from the new depth-to-groundwater map `nv_dtw_parity_statewide_100m` |
+| `gw_frac` | fraction | f: fraction of the field's ETa that groundwater can supply (Tan et al. 2025), from the new depth-to-groundwater map `nv_dtw_parity_statewide_100m` (2026-10-08 build) |
 | `AWC` | fraction | Available water capacity (volume of water per volume of soil) |
 | `PAW_ft` | ft | Plant-available water: AWC × 1.5 m root zone |
 

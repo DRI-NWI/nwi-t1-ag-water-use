@@ -92,8 +92,9 @@ f(d) = 1                                   d ≤ d_dec
 ```
 
 - **d** is the depth to groundwater, from the new statewide 100 m depth-to-groundwater map
-  `nv_dtw_parity_statewide_100m` (projection EPSG:5070), which covers every field, including
-  those outside Nevada.
+  `nv_dtw_parity_statewide_100m` (handily NV parity model, build of 2026-10-08; projection
+  EPSG:5070), which covers every field, including those outside Nevada. A later 30 m build of the
+  same model (2026-10-21) was not used; [GW_SUBSIDY.md](GW_SUBSIDY.md) gives its effect.
 - **d_dec** is the depth above which groundwater supplies all of ETa; **d_ext** is the depth
   below which it supplies none; **p** sets how fast f falls between them. Tan et al. give
   these for each combination of:
